@@ -1,0 +1,5 @@
+{
+  "name": "USTC Assistant",
+  "description": "An all-in-one learning assistant for USTC students managing First/Second classrooms, tasks, and exams.",
+  "requestFramePermissions": []
+}
