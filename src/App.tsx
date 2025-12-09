@@ -56,34 +56,34 @@ const App: React.FC = () => {
     setIsLoadingData(true);
     setSyncStatus('syncing');
     
-    const cloudData = await Storage.fetchUserData(studentId);
-    
-    if (cloudData) {
-      console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}, Todos: ${cloudData.todos.length}`);
-      setEvents(cloudData.schedule);
-      setTodos(cloudData.todos);
-      setIsDataLoaded(true); // Triggers re-render
-      setSyncStatus('idle');
-    } else {
-      console.warn("[App] Failed to load data or new user.");
-      setSyncStatus('error');
-      // Set loaded true to allow user to start creating data from scratch
-      setIsDataLoaded(true); 
+    try {
+      const cloudData = await Storage.fetchUserData(studentId);
+      
+      if (cloudData) {
+        console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}, Todos: ${cloudData.todos.length}`);
+        setEvents(cloudData.schedule);
+        setTodos(cloudData.todos);
+        setIsDataLoaded(true); // Triggers re-render
+        setSyncStatus('idle');
+      } else {
+        console.warn("[App] Failed to load data or new user.");
+        setSyncStatus('error');
+        // Set loaded true to allow user to start creating data from scratch
+        setIsDataLoaded(true); 
+      }
+    } catch (e) {
+      console.error("[App] Load Crash:", e);
+      setIsDataLoaded(true); // Ensure we don't block saving forever
+    } finally {
+      setIsLoadingData(false);
     }
-    setIsLoadingData(false);
   };
 
   // 3. Auto-Save to Cloud
   useEffect(() => {
     // Only save if we are logged in AND data has been loaded initially
-    if (!user) {
-        // console.log("[App] Skipping save: No User");
-        return;
-    }
-    if (!isDataLoaded) {
-        // console.log("[App] Skipping save: Data not loaded yet");
-        return;
-    }
+    if (!user) return;
+    if (!isDataLoaded) return;
 
     const saveData = async () => {
       console.warn(`[App] Auto-save triggered. Saving ${events.length} events...`);
@@ -134,6 +134,20 @@ const App: React.FC = () => {
   const handleUpdateSettings = (newSettings: AppSettings) => {
     if (user) {
       setUser({ ...user, settings: newSettings });
+    }
+  };
+
+  // Debugging Helper
+  const handleForceSync = async () => {
+    if (!user) {
+      alert("Please login first.");
+      return;
+    }
+    const result = await Storage.saveUserData(user.studentId, events, todos);
+    if (result.success) {
+      alert("✅ SUCCESS: Connected to Database and Saved Data!");
+    } else {
+      alert(`❌ ERROR: Could not save to database.\n\nReason: ${result.error}\n\nCheck your .env file or Supabase RLS policies.`);
     }
   };
 
@@ -287,7 +301,13 @@ const App: React.FC = () => {
         isLoadingAI={isLoadingAI}
       />
 
-      <SettingsDialog isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} settings={user.settings} onSave={handleUpdateSettings} />
+      <SettingsDialog 
+        isOpen={showSettingsModal} 
+        onClose={() => setShowSettingsModal(false)} 
+        settings={user.settings} 
+        onSave={handleUpdateSettings} 
+        onForceSync={handleForceSync}
+      />
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
