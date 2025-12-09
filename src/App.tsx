@@ -9,7 +9,7 @@ import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle } from 'lucide-react';
-import { addWeeks, addMonths, format, isPast } from 'date-fns';
+import { addWeeks, addMonths, format } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
