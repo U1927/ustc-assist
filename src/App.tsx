@@ -26,19 +26,73 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  
+  const [isValidatingTicket, setIsValidatingTicket] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
-  // 1. Initialization
+  // 1. Initialization & CAS Ticket Check
   useEffect(() => {
-    console.log("App Version: Cloud V7 (Sync Removed)");
+    console.log("App Version: Cloud V8 (CAS Auth)");
+
+    // Check for Ticket in URL
+    const params = new URLSearchParams(window.location.search);
+    const ticket = params.get('ticket');
     
-    const savedUser = Storage.getUserSession();
-    if (savedUser && savedUser.isLoggedIn) {
-      setUser(savedUser);
-      loadCloudData(savedUser.studentId);
+    if (ticket) {
+      handleTicketValidation(ticket);
+    } else {
+      // Normal Load
+      const savedUser = Storage.getUserSession();
+      if (savedUser && savedUser.isLoggedIn) {
+        setUser(savedUser);
+        loadCloudData(savedUser.studentId);
+      }
     }
   }, []);
+
+  const handleTicketValidation = async (ticket: string) => {
+    setIsValidatingTicket(true);
+    // Remove ticket from URL to keep it clean (and prevent reuse attempts)
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    try {
+      // Call Vercel Serverless Function to validate ticket
+      // Service URL must match what was sent to login
+      const serviceUrl = window.location.origin + window.location.pathname;
+      const res = await fetch(`/api/cas?ticket=${ticket}&service=${encodeURIComponent(serviceUrl)}`);
+      const data = await res.json();
+
+      if (data.success && data.studentId) {
+        console.log("CAS Validation Success. Student ID:", data.studentId);
+        
+        // Register/Login in Supabase
+        const authResult = await Storage.loginOrRegisterCAS(data.studentId);
+        
+        if (authResult.success) {
+           const newUserProfile: UserProfile = {
+             studentId: data.studentId,
+             name: `Student ${data.studentId}`,
+             isLoggedIn: true,
+             settings: { earlyEightReminder: true, reminderMinutesBefore: 15 }
+           };
+           setUser(newUserProfile);
+           Storage.saveUserSession(newUserProfile);
+           loadCloudData(data.studentId);
+           if (authResult.isNewUser) alert(`Welcome, ${data.studentId}! Your account has been created.`);
+        } else {
+           alert(`Database Login Error: ${authResult.error}`);
+        }
+      } else {
+        alert(`Authentication Failed: ${data.error || 'Invalid Ticket'}`);
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert("Network Error validating ticket.");
+    } finally {
+      setIsValidatingTicket(false);
+    }
+  };
 
   const loadCloudData = async (studentId: string) => {
     setSyncStatus('syncing');
@@ -48,11 +102,11 @@ const App: React.FC = () => {
       console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
       setEvents(data.schedule);
       setTodos(data.todos);
-      setIsDataLoaded(true); // Enable auto-save
+      setIsDataLoaded(true); 
       setSyncStatus('idle');
     } else {
-      console.warn("[App] Failed to load data (or network error). Starting with empty state.");
-      setIsDataLoaded(true); // Enable saving even if load failed (assuming new user or recovery)
+      console.warn("[App] Failed to load data. Starting with empty state.");
+      setIsDataLoaded(true); 
       setSyncStatus('error');
     }
   };
@@ -61,22 +115,17 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!user || !isDataLoaded) return;
 
-    // Debounce slightly to avoid rapid saves during typing
     const timeoutId = setTimeout(async () => {
       setSyncStatus('syncing');
-      console.log("[App] Auto-save triggered...");
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
       if (result.success) {
-        console.log("[App] Save Successful!");
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
-        console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
-        // Alert only on serious auth/policy errors to avoid spamming user
         if (result.error?.includes('policy') || result.error?.includes('401')) {
-          alert(`Cloud Save Failed: ${result.error}\n\nPlease check database permissions.`);
+          alert(`Cloud Save Failed: ${result.error}`);
         }
       }
     }, 500);
@@ -85,7 +134,7 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [events, todos, user, isDataLoaded]);
 
-  // 3. Persist Session Locally
+  // 3. Persist Session
   useEffect(() => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
@@ -115,7 +164,6 @@ const App: React.FC = () => {
     else alert(`Manual Sync Failed: ${result.error}`);
   };
 
-  // Handlers
   const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     loadCloudData(loggedInUser.studentId);
@@ -126,7 +174,8 @@ const App: React.FC = () => {
     Storage.clearSession();
     setIsDataLoaded(false);
     setEvents([]);
-    window.location.reload();
+    // Redirect to home without query params to be clean
+    window.location.href = window.location.origin + window.location.pathname;
   };
 
   const handleUpdateSettings = (newSettings: AppSettings) => {
@@ -211,6 +260,16 @@ const App: React.FC = () => {
       default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Cloud Ready</span>;
     }
   };
+
+  if (isValidatingTicket) {
+    return (
+      <div className="flex h-screen items-center justify-center flex-col bg-gray-50 gap-4">
+         <Loader2 className="animate-spin text-blue-600" size={48} />
+         <h2 className="text-xl font-bold text-gray-700">Validating USTC Identity...</h2>
+         <p className="text-gray-500 text-sm">Please wait while we communicate with Passport server.</p>
+      </div>
+    )
+  }
 
   if (!user) return <Login onLogin={handleLogin} />;
 
