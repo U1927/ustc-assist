@@ -26,84 +26,19 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  
-  const [isValidatingTicket, setIsValidatingTicket] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
-  // 1. Initialization & CAS Ticket Check
+  // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V9 (CAS Auth + Name Parsing)");
+    console.log("App Version: Cloud V10 (Standard Password Auth)");
 
-    // Check for Ticket and Name in URL
-    const params = new URLSearchParams(window.location.search);
-    const ticket = params.get('ticket');
-    const nameParam = params.get('name'); // Capture name from USTC CAS redirect
-    
-    if (ticket) {
-      handleTicketValidation(ticket, nameParam);
-    } else {
-      // Normal Load
-      const savedUser = Storage.getUserSession();
-      if (savedUser && savedUser.isLoggedIn) {
-        setUser(savedUser);
-        loadCloudData(savedUser.studentId);
-      }
+    const savedUser = Storage.getUserSession();
+    if (savedUser && savedUser.isLoggedIn) {
+      setUser(savedUser);
+      loadCloudData(savedUser.studentId);
     }
   }, []);
-
-  const handleTicketValidation = async (ticket: string, nameParam: string | null) => {
-    setIsValidatingTicket(true);
-    // Remove query params from URL to keep it clean (and prevent reuse attempts)
-    window.history.replaceState({}, document.title, window.location.pathname);
-
-    try {
-      // Call Vercel Serverless Function to validate ticket
-      // Service URL must match what was sent to login
-      const serviceUrl = window.location.origin + window.location.pathname;
-      const res = await fetch(`/api/cas?ticket=${ticket}&service=${encodeURIComponent(serviceUrl)}`);
-      const data = await res.json();
-
-      if (data.success && data.studentId) {
-        console.log("CAS Validation Success. Student ID:", data.studentId);
-        
-        // Register/Login in Supabase
-        const authResult = await Storage.loginOrRegisterCAS(data.studentId);
-        
-        if (authResult.success) {
-           // Try to decode real name from URL parameter, fallback to Student ID
-           let displayName = `Student ${data.studentId}`;
-           if (nameParam) {
-             try {
-               displayName = decodeURIComponent(nameParam);
-             } catch (e) {
-               console.warn("Failed to decode name parameter:", e);
-             }
-           }
-
-           const newUserProfile: UserProfile = {
-             studentId: data.studentId,
-             name: displayName,
-             isLoggedIn: true,
-             settings: { earlyEightReminder: true, reminderMinutesBefore: 15 }
-           };
-           setUser(newUserProfile);
-           Storage.saveUserSession(newUserProfile);
-           loadCloudData(data.studentId);
-           if (authResult.isNewUser) alert(`Welcome, ${displayName}! Your account has been created.`);
-        } else {
-           alert(`Database Login Error: ${authResult.error}`);
-        }
-      } else {
-        alert(`Authentication Failed: ${data.error || 'Invalid Ticket'}`);
-      }
-    } catch (e: any) {
-      console.error(e);
-      alert("Network Error validating ticket.");
-    } finally {
-      setIsValidatingTicket(false);
-    }
-  };
 
   const loadCloudData = async (studentId: string) => {
     setSyncStatus('syncing');
@@ -177,6 +112,7 @@ const App: React.FC = () => {
 
   const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
+    Storage.saveUserSession(loggedInUser);
     loadCloudData(loggedInUser.studentId);
   };
 
@@ -185,8 +121,7 @@ const App: React.FC = () => {
     Storage.clearSession();
     setIsDataLoaded(false);
     setEvents([]);
-    // Redirect to home without query params to be clean
-    window.location.href = window.location.origin + window.location.pathname;
+    window.location.reload();
   };
 
   const handleUpdateSettings = (newSettings: AppSettings) => {
@@ -271,16 +206,6 @@ const App: React.FC = () => {
       default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Cloud Ready</span>;
     }
   };
-
-  if (isValidatingTicket) {
-    return (
-      <div className="flex h-screen items-center justify-center flex-col bg-gray-50 gap-4">
-         <Loader2 className="animate-spin text-blue-600" size={48} />
-         <h2 className="text-xl font-bold text-gray-700">Validating USTC Identity...</h2>
-         <p className="text-gray-500 text-sm">Please wait while we communicate with Passport server.</p>
-      </div>
-    )
-  }
 
   if (!user) return <Login onLogin={handleLogin} />;
 
