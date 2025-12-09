@@ -33,14 +33,15 @@ const App: React.FC = () => {
 
   // 1. Initialization & CAS Ticket Check
   useEffect(() => {
-    console.log("App Version: Cloud V8 (CAS Auth)");
+    console.log("App Version: Cloud V9 (CAS Auth + Name Parsing)");
 
-    // Check for Ticket in URL
+    // Check for Ticket and Name in URL
     const params = new URLSearchParams(window.location.search);
     const ticket = params.get('ticket');
+    const nameParam = params.get('name'); // Capture name from USTC CAS redirect
     
     if (ticket) {
-      handleTicketValidation(ticket);
+      handleTicketValidation(ticket, nameParam);
     } else {
       // Normal Load
       const savedUser = Storage.getUserSession();
@@ -51,9 +52,9 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleTicketValidation = async (ticket: string) => {
+  const handleTicketValidation = async (ticket: string, nameParam: string | null) => {
     setIsValidatingTicket(true);
-    // Remove ticket from URL to keep it clean (and prevent reuse attempts)
+    // Remove query params from URL to keep it clean (and prevent reuse attempts)
     window.history.replaceState({}, document.title, window.location.pathname);
 
     try {
@@ -70,16 +71,26 @@ const App: React.FC = () => {
         const authResult = await Storage.loginOrRegisterCAS(data.studentId);
         
         if (authResult.success) {
+           // Try to decode real name from URL parameter, fallback to Student ID
+           let displayName = `Student ${data.studentId}`;
+           if (nameParam) {
+             try {
+               displayName = decodeURIComponent(nameParam);
+             } catch (e) {
+               console.warn("Failed to decode name parameter:", e);
+             }
+           }
+
            const newUserProfile: UserProfile = {
              studentId: data.studentId,
-             name: `Student ${data.studentId}`,
+             name: displayName,
              isLoggedIn: true,
              settings: { earlyEightReminder: true, reminderMinutesBefore: 15 }
            };
            setUser(newUserProfile);
            Storage.saveUserSession(newUserProfile);
            loadCloudData(data.studentId);
-           if (authResult.isNewUser) alert(`Welcome, ${data.studentId}! Your account has been created.`);
+           if (authResult.isNewUser) alert(`Welcome, ${displayName}! Your account has been created.`);
         } else {
            alert(`Database Login Error: ${authResult.error}`);
         }
