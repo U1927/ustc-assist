@@ -7,7 +7,6 @@ import SettingsDialog from './components/SettingsDialog';
 import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
-import * as Crawler from './services/crawlerService';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
@@ -27,13 +26,12 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [isSyncingJW, setIsSyncingJW] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V6 (Crawler Sync)");
+    console.log("App Version: Cloud V7 (Sync Removed)");
     
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -177,28 +175,6 @@ const App: React.FC = () => {
     setIsLoadingAI(false);
   };
 
-  const handleImportData = async () => {
-    if (!user) return;
-    setIsSyncingJW(true);
-    try {
-      // Calls the Crawler service which will likely fail CORS
-      // We catch it and show error, NO MOCK DATA.
-      const fetchedItems = await Crawler.fetchAllData(user.studentId);
-      
-      if (fetchedItems.length > 0) {
-        setEvents(prev => [...prev, ...fetchedItems]);
-        alert(`Successfully synced ${fetchedItems.length} items from JW.`);
-      } else {
-        alert("Sync returned 0 items. (Check console for CORS errors if on browser)");
-      }
-    } catch (e: any) {
-      console.error("Import failed:", e);
-      // alert(`Sync failed: ${e.message}\n\n(Likely CORS error due to direct browser request)`);
-    } finally {
-      setIsSyncingJW(false);
-    }
-  };
-
   const handleAddTodo = (content: string, deadline?: string) => {
     const todo: TodoItem = {
       id: crypto.randomUUID(),
@@ -290,9 +266,8 @@ const App: React.FC = () => {
         onDeleteTodo={handleDeleteTodo}
         onGeneratePlan={handleGeneratePlan}
         onOpenSettings={() => setShowSettingsModal(true)}
-        onImportData={handleImportData}
         conflicts={conflicts}
-        isLoadingAI={isSyncingJW || isLoadingAI}
+        isLoadingAI={isLoadingAI}
       />
 
       <SettingsDialog 
