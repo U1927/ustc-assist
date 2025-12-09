@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
@@ -8,8 +7,8 @@ import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './ty
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
-import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
-import { addWeeks, addMonths, format } from 'date-fns';
+import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
+import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
@@ -31,8 +30,7 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    // STARTUP PROOF
-    console.log("App Version: Cloud V2");
+    console.log("App Version: Cloud V3 (Fixed 406)");
     
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -43,44 +41,71 @@ const App: React.FC = () => {
 
   const loadCloudData = async (studentId: string) => {
     setSyncStatus('syncing');
+    console.log(`[App] Loading cloud data for ${studentId}...`);
     const data = await Storage.fetchUserData(studentId);
     if (data) {
+      console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
       setEvents(data.schedule);
       setTodos(data.todos);
       setIsDataLoaded(true); // Enable auto-save
       setSyncStatus('idle');
     } else {
-      setIsDataLoaded(true); // Even if fail/empty, allow working
+      console.warn("[App] Failed to load data (or network error). Starting with empty state.");
+      setIsDataLoaded(true); // Enable saving even if load failed (assuming new user or recovery)
       setSyncStatus('error');
     }
   };
 
-  // 2. Auto-Save
+  // 2. Auto-Save Logic
   useEffect(() => {
     if (!user || !isDataLoaded) return;
 
-    const saveData = async () => {
+    // Debounce slightly to avoid rapid saves during typing
+    const timeoutId = setTimeout(async () => {
       setSyncStatus('syncing');
+      console.log("[App] Auto-save triggered...");
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
       if (result.success) {
+        console.log("[App] Save Successful!");
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
+        console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
-        // FORCE ALERT
-        alert(`Cloud Save Failed!\nError: ${result.error}\n\nCheck Supabase RLS policies.`);
+        // Alert only on serious auth/policy errors to avoid spamming user
+        if (result.error?.includes('policy') || result.error?.includes('401')) {
+          alert(`Cloud Save Failed: ${result.error}\n\nPlease check database permissions.`);
+        }
       }
-    };
+    }, 500);
 
-    saveData();
     setConflicts(Utils.getConflicts(events));
+    return () => clearTimeout(timeoutId);
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session Locally
   useEffect(() => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
+
+  // 4. Reminders
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!user) return;
+      const now = new Date();
+      events.forEach(event => {
+        const start = new Date(event.startTime);
+        const diffMinutes = differenceInMinutes(start, now);
+        if (diffMinutes === user.settings.reminderMinutesBefore) {
+          if (Notification.permission === 'granted') {
+             new Notification(`Upcoming: ${event.title}`, { body: `Starts in ${diffMinutes} minutes.` });
+          }
+        }
+      });
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [events, user]);
 
   const handleForceSync = async () => {
     if (!user) return;
