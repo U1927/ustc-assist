@@ -14,8 +14,6 @@ import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-f
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
 const App: React.FC = () => {
-  console.log("[App] Rendering..."); // Verify App is running
-
   const [user, setUser] = useState<UserProfile | null>(null);
   const [events, setEvents] = useState<ScheduleItem[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -28,6 +26,7 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [errorMessage, setErrorMessage] = useState<string>('');
   
   // Prevent overwriting cloud data with empty local state on init
   const isDataLoaded = useRef(false);
@@ -36,10 +35,14 @@ const App: React.FC = () => {
 
   // 1. Initialize & Load Session
   useEffect(() => {
+    console.log("[App] Mount");
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
+      console.log("[App] Session found for:", savedUser.studentId);
       setUser(savedUser);
       loadCloudData(savedUser.studentId);
+    } else {
+      console.log("[App] No active session.");
     }
     
     if ('Notification' in window && Notification.permission !== 'granted') {
@@ -49,20 +52,23 @@ const App: React.FC = () => {
 
   // 2. Cloud Data Loading
   const loadCloudData = async (studentId: string) => {
+    console.log("[App] Loading cloud data...");
     setIsLoadingData(true);
     setSyncStatus('syncing');
     
     const cloudData = await Storage.fetchUserData(studentId);
     
     if (cloudData) {
+      console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}, Todos: ${cloudData.todos.length}`);
       setEvents(cloudData.schedule);
       setTodos(cloudData.todos);
       isDataLoaded.current = true;
       setSyncStatus('idle');
     } else {
+      console.warn("[App] Failed to load data or new user.");
       // Failed to load or new user
       setSyncStatus('error');
-      // We set loaded to true anyway so user can start adding items locally if offline
+      // We set loaded to true anyway so user can start adding items locally
       isDataLoaded.current = true;
     }
     setIsLoadingData(false);
@@ -70,17 +76,30 @@ const App: React.FC = () => {
 
   // 3. Auto-Save to Cloud
   useEffect(() => {
+    // Debug log to trace save triggers
+    console.log(`[App] State Change - User: ${!!user}, Loaded: ${isDataLoaded.current}, Events: ${events.length}`);
+
     // Only save if we are logged in AND data has been loaded initially
-    if (!user || !isDataLoaded.current) return;
+    if (!user || !isDataLoaded.current) {
+        console.log("[App] Skipping save: Not logged in or data not yet loaded.");
+        return;
+    }
 
     const saveData = async () => {
       setSyncStatus('syncing');
-      const success = await Storage.saveUserData(user.studentId, events, todos);
-      if (success) {
+      setErrorMessage('');
+      console.log("[App] Triggering Storage.saveUserData...");
+      
+      const result = await Storage.saveUserData(user.studentId, events, todos);
+      
+      if (result.success) {
+        console.log("[App] Save Complete.");
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
+        console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
+        setErrorMessage(result.error || "Unknown Error");
       }
     };
 
@@ -192,7 +211,13 @@ const App: React.FC = () => {
     switch(syncStatus) {
       case 'syncing': return <span className="flex items-center gap-1 text-blue-600 text-xs"><Loader2 className="animate-spin" size={12}/> Syncing...</span>;
       case 'saved': return <span className="flex items-center gap-1 text-green-600 text-xs"><CheckCircle size={12}/> Cloud Saved</span>;
-      case 'error': return <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><AlertCircle size={12}/> Save Failed</span>;
+      case 'error': 
+        return (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><AlertCircle size={12}/> Save Failed</span>
+            {errorMessage && <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={errorMessage}>({errorMessage})</span>}
+          </div>
+        );
       default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Ready</span>;
     }
   };
