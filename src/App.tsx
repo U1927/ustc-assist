@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
@@ -6,7 +7,8 @@ import SettingsDialog from './components/SettingsDialog';
 import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
-import { generateStudyPlan, parseScheduleFromFile } from './services/aiService';
+import * as Crawler from './services/crawlerService';
+import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
@@ -25,12 +27,13 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isSyncingJW, setIsSyncingJW] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V5 (PDF/Image Import)");
+    console.log("App Version: Cloud V6 (Crawler Sync)");
     
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -174,29 +177,25 @@ const App: React.FC = () => {
     setIsLoadingAI(false);
   };
 
-  const handleImportScheduleFile = async (file: File) => {
-    setIsLoadingAI(true);
+  const handleImportData = async () => {
+    if (!user) return;
+    setIsSyncingJW(true);
     try {
-      const parsedEvents = await parseScheduleFromFile(file);
-      if (parsedEvents.length > 0) {
-        // Filter out duplicates (simple ID check won't work for new items, so checking title+start)
-        const currentEventSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
-        const newUniqueEvents = parsedEvents.filter(e => !currentEventSignatures.has(`${e.title}-${e.startTime}`));
-        
-        if (newUniqueEvents.length > 0) {
-          setEvents(prev => [...prev, ...newUniqueEvents]);
-          alert(`Successfully imported ${newUniqueEvents.length} courses from the file!\n\nNote: They have been mapped to the current week.`);
-        } else {
-          alert("Parsed file successfully, but all courses appear to be duplicates of existing ones.");
-        }
+      // Calls the Crawler service which will likely fail CORS
+      // We catch it and show error, NO MOCK DATA.
+      const fetchedItems = await Crawler.fetchAllData(user.studentId);
+      
+      if (fetchedItems.length > 0) {
+        setEvents(prev => [...prev, ...fetchedItems]);
+        alert(`Successfully synced ${fetchedItems.length} items from JW.`);
       } else {
-        alert("AI processed the file but found no courses. Please ensure the file is clear.");
+        alert("Sync returned 0 items. (Check console for CORS errors if on browser)");
       }
-    } catch (error) {
-      console.error(error);
-      alert("Failed to parse file. Ensure your API Key is valid and the file is readable.");
+    } catch (e: any) {
+      console.error("Import failed:", e);
+      // alert(`Sync failed: ${e.message}\n\n(Likely CORS error due to direct browser request)`);
     } finally {
-      setIsLoadingAI(false);
+      setIsSyncingJW(false);
     }
   };
 
@@ -291,9 +290,9 @@ const App: React.FC = () => {
         onDeleteTodo={handleDeleteTodo}
         onGeneratePlan={handleGeneratePlan}
         onOpenSettings={() => setShowSettingsModal(true)}
-        onImportScheduleFile={handleImportScheduleFile}
+        onImportData={handleImportData}
         conflicts={conflicts}
-        isLoadingAI={isLoadingAI}
+        isLoadingAI={isSyncingJW || isLoadingAI}
       />
 
       <SettingsDialog 
