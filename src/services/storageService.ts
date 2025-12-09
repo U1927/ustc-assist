@@ -1,3 +1,4 @@
+
 import { ScheduleItem, TodoItem, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -22,24 +23,24 @@ export const clearSession = () => {
 // --- Cloud Operations (Supabase) ---
 
 /**
- * Authenticates a user.
- * - If user does not exist: Registers them with the provided password.
- * - If user exists: Verifies the password.
+ * Handles login after successful CAS validation.
+ * - If user exists: Returns success.
+ * - If user does not exist: Automatically registers them (no password needed).
  */
-export const authenticateUser = async (studentId: string, passwordInput: string): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
+export const loginOrRegisterCAS = async (studentId: string): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
   if (!supabase) return { success: false, error: "System Error: Database not connected." };
 
   try {
     // 1. Check if user exists
     const { data, error } = await supabase
       .from('user_data')
-      .select('student_id, password')
+      .select('student_id')
       .eq('student_id', studentId)
       .maybeSingle();
 
     if (error) {
       console.error("Auth Check Error:", error);
-      return { success: false, error: "Network error during authentication." };
+      return { success: false, error: "Database connection failed during login." };
     }
 
     // 2. Scenario: New User (Register)
@@ -48,30 +49,21 @@ export const authenticateUser = async (studentId: string, passwordInput: string)
         .from('user_data')
         .insert({
           student_id: studentId,
-          password: passwordInput, // Note: In a real production app, hash this!
+          // No password field needed for CAS users
           schedule: [],
           todos: []
         });
       
       if (insertError) {
-        return { success: false, error: "Registration failed." };
+        console.error("Registration Error:", insertError);
+        return { success: false, error: "Failed to initialize new user data." };
       }
       return { success: true, isNewUser: true };
     }
 
     // 3. Scenario: Existing User (Login)
-    // Handle legacy users who might have null password
-    if (data.password === null) {
-       // Optional: Update legacy user with new password
-       await supabase.from('user_data').update({ password: passwordInput }).eq('student_id', studentId);
-       return { success: true };
-    }
-
-    if (data.password === passwordInput) {
-      return { success: true };
-    } else {
-      return { success: false, error: "Incorrect password." };
-    }
+    // Simply return success because CAS has already verified their identity
+    return { success: true, isNewUser: false };
 
   } catch (err: any) {
     return { success: false, error: err.message };
@@ -117,7 +109,6 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
   const cleanTodos = JSON.parse(JSON.stringify(todos));
 
   try {
-    // We only update schedule/todos, we don't touch the password here
     const { error } = await supabase
       .from('user_data')
       .update({
@@ -127,9 +118,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
       })
       .eq('student_id', studentId);
 
-    // If update fails (e.g. row doesn't exist, which shouldn't happen if logged in), try upsert but be careful about password
     if (error) {
-       // Fallback for extreme cases, but generally 'authenticateUser' ensures row exists
        console.error("[Storage] Update Error:", error);
        return { success: false, error: `${error.code}: ${error.message}` };
     }
@@ -148,3 +137,4 @@ export const getTodos = () => [];
 export const saveUser = () => {};
 export const getUser = () => null;
 export const clearData = () => {};
+export const authenticateUser = async () => ({ success: false, error: "Deprecated" });
