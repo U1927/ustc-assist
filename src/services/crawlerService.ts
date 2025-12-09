@@ -1,3 +1,7 @@
+
 // Crawler service has been removed.
-// All data is now managed via the centralized Supabase database.
-export {};
+// We are now using Supabase Cloud Sync.
+export const fetchAllData = async () => {
+  console.warn("Crawler is disabled.");
+  return [];
+};
