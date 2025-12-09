@@ -8,7 +8,7 @@ import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './ty
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
-import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle, WifiOff } from 'lucide-react';
 import { addWeeks, addMonths, format } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
@@ -24,100 +24,70 @@ const App: React.FC = () => {
   
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
-  const [isLoadingData, setIsLoadingData] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  
-  // State to track if data is ready for auto-saving
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
-  // 1. Initialize & Load Session
+  // 1. Initialization
   useEffect(() => {
-    console.log("[App] Mount - Checking Session");
+    // STARTUP PROOF
+    console.log("App Version: Cloud V2");
+    
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
-      console.log("[App] Session found for:", savedUser.studentId);
       setUser(savedUser);
       loadCloudData(savedUser.studentId);
-    } else {
-      console.log("[App] No active session.");
-    }
-    
-    if ('Notification' in window && Notification.permission !== 'granted') {
-      Notification.requestPermission();
     }
   }, []);
 
-  // 2. Cloud Data Loading
   const loadCloudData = async (studentId: string) => {
-    console.log("[App] Loading cloud data...");
-    setIsLoadingData(true);
     setSyncStatus('syncing');
-    
-    try {
-      const cloudData = await Storage.fetchUserData(studentId);
-      
-      if (cloudData) {
-        console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}`);
-        setEvents(cloudData.schedule);
-        setTodos(cloudData.todos);
-        setSyncStatus('idle');
-      } else {
-        console.warn("[App] New user or load failed.");
-        setSyncStatus('idle');
-      }
-      setIsDataLoaded(true); // Allow saving after load attempt
-    } catch (e: any) {
-      console.error("[App] Load Crash:", e);
-      alert("Failed to load data from Cloud: " + e.message);
-      setIsDataLoaded(true); 
-    } finally {
-      setIsLoadingData(false);
+    const data = await Storage.fetchUserData(studentId);
+    if (data) {
+      setEvents(data.schedule);
+      setTodos(data.todos);
+      setIsDataLoaded(true); // Enable auto-save
+      setSyncStatus('idle');
+    } else {
+      setIsDataLoaded(true); // Even if fail/empty, allow working
+      setSyncStatus('error');
     }
   };
 
-  // 3. Auto-Save to Cloud
+  // 2. Auto-Save
   useEffect(() => {
-    // Debug logging for why save might be skipped
-    if (!user) return; 
-    if (!isDataLoaded) {
-      console.log("[App] Skipping save: Data not loaded yet.");
-      return;
-    }
+    if (!user || !isDataLoaded) return;
 
     const saveData = async () => {
-      console.warn(`[App] Auto-save triggered.`);
       setSyncStatus('syncing');
-      setErrorMessage('');
-      
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
       if (result.success) {
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
-        console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
-        setErrorMessage(result.error || "Error");
-        // FORCE ALERT ON FAILURE
-        alert(`❌ Data Save Failed!\nReason: ${result.error}\n\nPlease check your internet or database settings.`);
+        // FORCE ALERT
+        alert(`Cloud Save Failed!\nError: ${result.error}\n\nCheck Supabase RLS policies.`);
       }
     };
 
     saveData();
-    
-    // Check conflicts
-    const conflictList = Utils.getConflicts(events);
-    setConflicts(conflictList);
-
+    setConflicts(Utils.getConflicts(events));
   }, [events, todos, user, isDataLoaded]);
 
-  // 4. Save Session Locally
+  // 3. Persist Session Locally
   useEffect(() => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
+
+  const handleForceSync = async () => {
+    if (!user) return;
+    const result = await Storage.saveUserData(user.studentId, events, todos);
+    if (result.success) alert("Manual Sync Successful!");
+    else alert(`Manual Sync Failed: ${result.error}`);
+  };
 
   // Handlers
   const handleLogin = (loggedInUser: UserProfile) => {
@@ -130,24 +100,11 @@ const App: React.FC = () => {
     Storage.clearSession();
     setIsDataLoaded(false);
     setEvents([]);
-    setTodos([]);
     window.location.reload();
   };
 
   const handleUpdateSettings = (newSettings: AppSettings) => {
-    if (user) {
-      setUser({ ...user, settings: newSettings });
-    }
-  };
-
-  const handleForceSync = async () => {
-    if (!user) return;
-    const result = await Storage.saveUserData(user.studentId, events, todos);
-    if (result.success) {
-      alert("✅ SUCCESS: Saved to Cloud Database!");
-    } else {
-      alert(`❌ ERROR: ${result.error}`);
-    }
+    if (user) setUser({ ...user, settings: newSettings });
   };
 
   const handleAddEvent = (e: React.FormEvent) => {
@@ -166,7 +123,7 @@ const App: React.FC = () => {
     };
 
     if (Utils.checkForConflicts(item, events)) {
-       if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
+       if (!confirm("Conflict detected! Add anyway?")) return;
     }
 
     setEvents(prev => [...prev, item]);
@@ -187,7 +144,7 @@ const App: React.FC = () => {
     if (newPlan.length > 0) {
        setEvents(prev => [...prev, ...newPlan]);
     } else {
-       alert("Could not generate a plan. Check API Key.");
+       alert("AI Plan generation failed. Check API Key.");
     }
     setIsLoadingAI(false);
   };
@@ -223,21 +180,13 @@ const App: React.FC = () => {
   const renderSyncStatus = () => {
     switch(syncStatus) {
       case 'syncing': return <span className="flex items-center gap-1 text-blue-600 text-xs"><Loader2 className="animate-spin" size={12}/> Syncing...</span>;
-      case 'saved': return <span className="flex items-center gap-1 text-green-600 text-xs"><CheckCircle size={12}/> Cloud Saved</span>;
-      case 'error': 
-        return (
-          <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><AlertCircle size={12}/> Save Failed</span>
-            {errorMessage && <span className="text-[10px] text-red-400 max-w-[200px] truncate" title={errorMessage}>({errorMessage})</span>}
-          </div>
-        );
-      default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Ready</span>;
+      case 'saved': return <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle size={12}/> Saved</span>;
+      case 'error': return <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><WifiOff size={12}/> Sync Error</span>;
+      default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Cloud Ready</span>;
     }
   };
 
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
-  }
+  if (!user) return <Login onLogin={handleLogin} />;
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-slate-800">
@@ -268,19 +217,10 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden p-4 relative flex flex-col">
-          {isLoadingData ? (
-             <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-20">
-                <div className="flex flex-col items-center gap-3">
-                   <Loader2 className="animate-spin text-blue-600" size={32} />
-                   <p className="text-sm text-gray-500">Syncing with Cloud Database...</p>
-                </div>
-             </div>
-          ) : (
-            <div className="flex-1 overflow-hidden">
-               <CalendarView mode={viewMode} currentDate={currentDate} events={events} onDeleteEvent={handleDeleteEvent} />
-            </div>
-          )}
+        <main className="flex-1 overflow-hidden p-4 flex flex-col">
+          <div className="flex-1 overflow-hidden">
+             <CalendarView mode={viewMode} currentDate={currentDate} events={events} onDeleteEvent={handleDeleteEvent} />
+          </div>
           <div className="h-6 mt-1 flex items-center justify-end px-2 bg-gray-50 border-t border-gray-200 rounded-b-lg">
              {renderSyncStatus()}
           </div>
