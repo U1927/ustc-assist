@@ -7,9 +7,12 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("[Supabase] CRITICAL ERROR: Missing Environment Variables!");
-  console.error("VITE_SUPABASE_URL:", supabaseUrl);
-  console.error("VITE_SUPABASE_ANON_KEY:", supabaseKey ? "Set (Hidden)" : "Missing");
+  const msg = "[Supabase] CRITICAL ERROR: Missing Environment Variables! Check your .env file.";
+  console.error(msg);
+  // Force alert so user sees it immediately
+  if (typeof window !== 'undefined') {
+    alert(msg + "\n\nURL: " + (supabaseUrl || "MISSING") + "\nKey: " + (supabaseKey ? "PRESENT" : "MISSING"));
+  }
 } else {
   console.log("[Supabase] Configuration loaded. URL:", supabaseUrl);
 }
