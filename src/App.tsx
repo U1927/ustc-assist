@@ -6,7 +6,7 @@ import SettingsDialog from './components/SettingsDialog';
 import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
-import { generateStudyPlan, parseScheduleFromImage } from './services/aiService';
+import { generateStudyPlan, parseScheduleFromFile } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
@@ -30,7 +30,7 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V4 (AI Image Import)");
+    console.log("App Version: Cloud V5 (PDF/Image Import)");
     
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -174,10 +174,10 @@ const App: React.FC = () => {
     setIsLoadingAI(false);
   };
 
-  const handleImportScheduleImage = async (file: File) => {
+  const handleImportScheduleFile = async (file: File) => {
     setIsLoadingAI(true);
     try {
-      const parsedEvents = await parseScheduleFromImage(file);
+      const parsedEvents = await parseScheduleFromFile(file);
       if (parsedEvents.length > 0) {
         // Filter out duplicates (simple ID check won't work for new items, so checking title+start)
         const currentEventSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
@@ -185,16 +185,16 @@ const App: React.FC = () => {
         
         if (newUniqueEvents.length > 0) {
           setEvents(prev => [...prev, ...newUniqueEvents]);
-          alert(`Successfully imported ${newUniqueEvents.length} courses from the image!\n\nNote: They have been mapped to the current week.`);
+          alert(`Successfully imported ${newUniqueEvents.length} courses from the file!\n\nNote: They have been mapped to the current week.`);
         } else {
-          alert("Parsed image successfully, but all courses appear to be duplicates of existing ones.");
+          alert("Parsed file successfully, but all courses appear to be duplicates of existing ones.");
         }
       } else {
-        alert("AI processed the image but found no courses. Please ensure the image is clear.");
+        alert("AI processed the file but found no courses. Please ensure the file is clear.");
       }
     } catch (error) {
       console.error(error);
-      alert("Failed to parse image. Ensure your API Key is valid and the image is readable.");
+      alert("Failed to parse file. Ensure your API Key is valid and the file is readable.");
     } finally {
       setIsLoadingAI(false);
     }
@@ -291,7 +291,7 @@ const App: React.FC = () => {
         onDeleteTodo={handleDeleteTodo}
         onGeneratePlan={handleGeneratePlan}
         onOpenSettings={() => setShowSettingsModal(true)}
-        onImportScheduleImage={handleImportScheduleImage}
+        onImportScheduleFile={handleImportScheduleFile}
         conflicts={conflicts}
         isLoadingAI={isLoadingAI}
       />
