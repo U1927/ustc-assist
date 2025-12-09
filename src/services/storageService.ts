@@ -23,49 +23,69 @@ export const clearSession = () => {
 // --- Cloud Operations (Supabase) ---
 
 /**
- * Handles login after successful CAS validation.
- * - If user exists: Returns success.
- * - If user does not exist: Automatically registers them (no password needed).
+ * Register a new user with ID and Password
  */
-export const loginOrRegisterCAS = async (studentId: string): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> => {
+export const registerUser = async (studentId: string, password: string): Promise<{ success: boolean; error?: string }> => {
   if (!supabase) return { success: false, error: "System Error: Database not connected." };
 
   try {
-    // 1. Check if user exists
-    const { data, error } = await supabase
+    // 1. Check if user already exists
+    const { data: existingUser, error: checkError } = await supabase
       .from('user_data')
       .select('student_id')
       .eq('student_id', studentId)
       .maybeSingle();
 
-    if (error) {
-      console.error("Auth Check Error:", error);
-      return { success: false, error: "Database connection failed during login." };
+    if (checkError) throw checkError;
+    if (existingUser) {
+      return { success: false, error: "User already exists. Please login." };
     }
 
-    // 2. Scenario: New User (Register)
-    if (!data) {
-      const { error: insertError } = await supabase
-        .from('user_data')
-        .insert({
-          student_id: studentId,
-          // No password field needed for CAS users
-          schedule: [],
-          todos: []
-        });
-      
-      if (insertError) {
-        console.error("Registration Error:", insertError);
-        return { success: false, error: "Failed to initialize new user data." };
-      }
-      return { success: true, isNewUser: true };
-    }
+    // 2. Insert new user
+    const { error: insertError } = await supabase
+      .from('user_data')
+      .insert({
+        student_id: studentId,
+        password: password, // In a real app, verify this is hashed or handled securely by Supabase Auth
+        schedule: [],
+        todos: []
+      });
 
-    // 3. Scenario: Existing User (Login)
-    // Simply return success because CAS has already verified their identity
-    return { success: true, isNewUser: false };
+    if (insertError) throw insertError;
 
+    return { success: true };
   } catch (err: any) {
+    console.error("Registration Error:", err);
+    return { success: false, error: err.message };
+  }
+};
+
+/**
+ * Login existing user with ID and Password
+ */
+export const loginUser = async (studentId: string, password: string): Promise<{ success: boolean; error?: string; user?: any }> => {
+  if (!supabase) return { success: false, error: "System Error: Database not connected." };
+
+  try {
+    const { data, error } = await supabase
+      .from('user_data')
+      .select('student_id, password') // Select password to verify
+      .eq('student_id', studentId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return { success: false, error: "User not found. Please register." };
+    }
+
+    // Verify Password (Simple comparison for this architecture)
+    if (data.password !== password) {
+      return { success: false, error: "Incorrect password." };
+    }
+
+    return { success: true, user: data };
+  } catch (err: any) {
+    console.error("Login Error:", err);
     return { success: false, error: err.message };
   }
 };
@@ -129,12 +149,5 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
   }
 };
 
-// Legacy stubs
-export const saveSchedule = () => {};
-export const getSchedule = () => [];
-export const saveTodos = () => {};
-export const getTodos = () => [];
-export const saveUser = () => {};
-export const getUser = () => null;
-export const clearData = () => {};
-export const authenticateUser = async () => ({ success: false, error: "Deprecated" });
+// Deprecated stubs
+export const loginOrRegisterCAS = async () => ({ success: false });
