@@ -63,18 +63,26 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
     return false;
   }
 
+  // Sanitization: Ensure clean JSON (removes undefined, functions, etc)
+  const cleanSchedule = JSON.parse(JSON.stringify(schedule));
+  const cleanTodos = JSON.parse(JSON.stringify(todos));
+
   try {
     const { error } = await supabase
       .from('user_data')
       .upsert({
         student_id: studentId,
-        schedule: schedule,
-        todos: todos,
+        schedule: cleanSchedule,
+        todos: cleanTodos,
         updated_at: new Date().toISOString()
       }, { onConflict: 'student_id' });
 
     if (error) {
       console.error("[Supabase] Save API Error:", error);
+      // Alert user about Policy error (RLS) specifically
+      if (error.code === '42501' || error.message.includes('row-level security')) {
+        console.error("CRITICAL: RLS Policy Violation. Please run the schema.sql again in Supabase.");
+      }
       return false;
     }
 
