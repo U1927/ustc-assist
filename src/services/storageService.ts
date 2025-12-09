@@ -1,4 +1,3 @@
-
 import { ScheduleItem, TodoItem, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 
@@ -24,24 +23,28 @@ export const clearSession = () => {
 
 export const fetchUserData = async (studentId: string): Promise<{ schedule: ScheduleItem[], todos: TodoItem[] } | null> => {
   if (!supabase) {
-    alert("Supabase client not initialized! Check .env");
+    console.error("Supabase client not initialized! Check .env");
     return null;
   }
 
   try {
+    // FIX: Use maybeSingle() instead of single() to handle new users (0 rows) gracefully without 406 error
     const { data, error } = await supabase
       .from('user_data')
       .select('*')
       .eq('student_id', studentId)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') {
-        // Not found is okay for new users
-        return { schedule: [], todos: [] };
-      }
-      alert(`Fetch Error: ${error.message}`);
+      console.error(`[Storage] Fetch Error:`, error);
+      // alert(`Fetch Error: ${error.message}`);
       return null;
+    }
+
+    // If data is null (new user), return empty arrays
+    if (!data) {
+      console.log(`[Storage] No data found for ${studentId}, initializing new user.`);
+      return { schedule: [], todos: [] };
     }
 
     return {
@@ -49,7 +52,7 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
       todos: data.todos || []
     };
   } catch (err: any) {
-    alert(`Network Error during Fetch: ${err.message}`);
+    console.error(`[Storage] Network Error during Fetch:`, err);
     return null;
   }
 };
@@ -57,7 +60,7 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
 export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<{ success: boolean; error?: string }> => {
   if (!supabase) return { success: false, error: "Supabase client missing" };
 
-  // Sanitize data
+  // Sanitize data (remove undefined)
   const cleanSchedule = JSON.parse(JSON.stringify(schedule));
   const cleanTodos = JSON.parse(JSON.stringify(todos));
 
@@ -72,7 +75,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
       }, { onConflict: 'student_id' });
 
     if (error) {
-      console.error(error);
+      console.error("[Storage] Save Error:", error);
       return { success: false, error: `${error.code}: ${error.message}` };
     }
 
@@ -82,7 +85,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
   }
 };
 
-// Legacy stubs to prevent crash if old code calls them (should not happen)
+// Legacy stubs
 export const saveSchedule = () => {};
 export const getSchedule = () => [];
 export const saveTodos = () => {};
