@@ -63,7 +63,7 @@ interface SaveResult {
 }
 
 export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<SaveResult> => {
-  console.log(`[Storage] Attempting to save data for ${studentId}...`);
+  console.warn(`[Storage] Saving Payload - Events: ${schedule.length}, Todos: ${todos.length}`);
 
   if (!supabase) {
     const msg = "Client offline (No Env Vars)";
