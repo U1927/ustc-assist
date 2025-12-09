@@ -9,7 +9,7 @@ import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle } from 'lucide-react';
-import { addWeeks, addMonths, format, addMonths as addMonthsFns, isPast } from 'date-fns';
+import { addWeeks, addMonths, format, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
@@ -28,7 +28,7 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   
-  // Changed from useRef to useState to ensure re-renders trigger the useEffect dependencies correctly
+  // State to track if data is ready for auto-saving
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
@@ -60,20 +60,18 @@ const App: React.FC = () => {
       const cloudData = await Storage.fetchUserData(studentId);
       
       if (cloudData) {
-        console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}, Todos: ${cloudData.todos.length}`);
+        console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}`);
         setEvents(cloudData.schedule);
         setTodos(cloudData.todos);
-        setIsDataLoaded(true); // Triggers re-render
         setSyncStatus('idle');
       } else {
-        console.warn("[App] Failed to load data or new user.");
-        setSyncStatus('error');
-        // Set loaded true to allow user to start creating data from scratch
-        setIsDataLoaded(true); 
+        console.warn("[App] New user or load failed.");
+        setSyncStatus('idle');
       }
+      setIsDataLoaded(true); // Allow saving after load attempt
     } catch (e) {
       console.error("[App] Load Crash:", e);
-      setIsDataLoaded(true); // Ensure we don't block saving forever
+      setIsDataLoaded(true); 
     } finally {
       setIsLoadingData(false);
     }
@@ -81,37 +79,35 @@ const App: React.FC = () => {
 
   // 3. Auto-Save to Cloud
   useEffect(() => {
-    // Only save if we are logged in AND data has been loaded initially
-    if (!user) return;
-    if (!isDataLoaded) return;
+    // Only save if logged in AND data has been loaded initially
+    if (!user || !isDataLoaded) return;
 
     const saveData = async () => {
-      console.warn(`[App] Auto-save triggered. Saving ${events.length} events...`);
+      console.warn(`[App] Auto-save triggered.`);
       setSyncStatus('syncing');
       setErrorMessage('');
       
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
       if (result.success) {
-        console.log("[App] Save Complete.");
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
         console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
-        setErrorMessage(result.error || "Unknown Error");
+        setErrorMessage(result.error || "Error");
       }
     };
 
     saveData();
     
-    // Check conflicts locally
+    // Check conflicts
     const conflictList = Utils.getConflicts(events);
     setConflicts(conflictList);
 
   }, [events, todos, user, isDataLoaded]);
 
-  // 4. Save Session Locally (Login state only)
+  // 4. Save Session Locally
   useEffect(() => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
@@ -137,17 +133,13 @@ const App: React.FC = () => {
     }
   };
 
-  // Debugging Helper
   const handleForceSync = async () => {
-    if (!user) {
-      alert("Please login first.");
-      return;
-    }
+    if (!user) return;
     const result = await Storage.saveUserData(user.studentId, events, todos);
     if (result.success) {
-      alert("✅ SUCCESS: Connected to Database and Saved Data!");
+      alert("✅ SUCCESS: Saved to Cloud Database!");
     } else {
-      alert(`❌ ERROR: Could not save to database.\n\nReason: ${result.error}\n\nCheck your .env file or Supabase RLS policies.`);
+      alert(`❌ ERROR: ${result.error}`);
     }
   };
 
@@ -165,8 +157,6 @@ const App: React.FC = () => {
       textbook: newEvent.textbook,
       description: newEvent.description
     };
-
-    console.warn("[App] User adding event:", item);
 
     if (Utils.checkForConflicts(item, events)) {
        if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
