@@ -26,7 +26,7 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
   console.log(`[Storage] Fetching cloud data for: ${studentId}`);
   
   if (!supabase) {
-    console.error("[Storage] Supabase client is not initialized.");
+    console.error("[Storage] Supabase client is not initialized (Check .env).");
     return null;
   }
 
@@ -66,9 +66,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
   console.warn(`[Storage] Saving Payload - Events: ${schedule.length}, Todos: ${todos.length}`);
 
   if (!supabase) {
-    const msg = "Client offline (Env Vars VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing)";
-    console.error(`[Storage] ${msg}`);
-    return { success: false, error: msg };
+    return { success: false, error: "Client offline (Env Vars missing)" };
   }
 
   // Sanitize data (remove undefined) to avoid JSON errors
@@ -87,13 +85,13 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
 
     if (error) {
       console.error("[Storage] Supabase Save Error:", error);
-      return { success: false, error: `${error.code}: ${error.message || error.details}` };
+      return { success: false, error: `${error.code}: ${error.message}` };
     }
 
     console.log("[Storage] Save Successful!");
     return { success: true };
   } catch (err: any) {
     console.error("[Storage] Unexpected error during save:", err);
-    return { success: false, error: err.message || "Network/Unknown Error" };
+    return { success: false, error: err.message || "Network Error" };
   }
 };
