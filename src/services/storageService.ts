@@ -66,7 +66,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
   console.warn(`[Storage] Saving Payload - Events: ${schedule.length}, Todos: ${todos.length}`);
 
   if (!supabase) {
-    const msg = "Client offline (No Env Vars)";
+    const msg = "Client offline (Env Vars VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY missing)";
     console.error(`[Storage] ${msg}`);
     return { success: false, error: msg };
   }
@@ -87,7 +87,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
 
     if (error) {
       console.error("[Storage] Supabase Save Error:", error);
-      return { success: false, error: error.message || error.details || "DB Error" };
+      return { success: false, error: `${error.code}: ${error.message || error.details}` };
     }
 
     console.log("[Storage] Save Successful!");
