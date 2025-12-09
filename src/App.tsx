@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
 import Sidebar from './components/Sidebar';
@@ -9,7 +9,7 @@ import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, AlertCircle } from 'lucide-react';
-import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
+import { addWeeks, addMonths, format, addMonths as addMonthsFns, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
@@ -28,14 +28,14 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
   
-  // Prevent overwriting cloud data with empty local state on init
-  const isDataLoaded = useRef(false);
+  // Changed from useRef to useState to ensure re-renders trigger the useEffect dependencies correctly
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
   // 1. Initialize & Load Session
   useEffect(() => {
-    console.log("[App] Mount");
+    console.log("[App] Mount - Checking Session");
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
       console.log("[App] Session found for:", savedUser.studentId);
@@ -62,33 +62,33 @@ const App: React.FC = () => {
       console.log(`[App] Data loaded. Events: ${cloudData.schedule.length}, Todos: ${cloudData.todos.length}`);
       setEvents(cloudData.schedule);
       setTodos(cloudData.todos);
-      isDataLoaded.current = true;
+      setIsDataLoaded(true); // Triggers re-render
       setSyncStatus('idle');
     } else {
       console.warn("[App] Failed to load data or new user.");
-      // Failed to load or new user
       setSyncStatus('error');
-      // We set loaded to true anyway so user can start adding items locally
-      isDataLoaded.current = true;
+      // Set loaded true to allow user to start creating data from scratch
+      setIsDataLoaded(true); 
     }
     setIsLoadingData(false);
   };
 
   // 3. Auto-Save to Cloud
   useEffect(() => {
-    // Debug log to trace save triggers
-    console.log(`[App] State Change - User: ${!!user}, Loaded: ${isDataLoaded.current}, Events: ${events.length}`);
-
     // Only save if we are logged in AND data has been loaded initially
-    if (!user || !isDataLoaded.current) {
-        console.log("[App] Skipping save: Not logged in or data not yet loaded.");
+    if (!user) {
+        // console.log("[App] Skipping save: No User");
+        return;
+    }
+    if (!isDataLoaded) {
+        // console.log("[App] Skipping save: Data not loaded yet");
         return;
     }
 
     const saveData = async () => {
+      console.warn(`[App] Auto-save triggered. Saving ${events.length} events...`);
       setSyncStatus('syncing');
       setErrorMessage('');
-      console.log("[App] Triggering Storage.saveUserData...");
       
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
@@ -109,7 +109,7 @@ const App: React.FC = () => {
     const conflictList = Utils.getConflicts(events);
     setConflicts(conflictList);
 
-  }, [events, todos, user]);
+  }, [events, todos, user, isDataLoaded]);
 
   // 4. Save Session Locally (Login state only)
   useEffect(() => {
@@ -125,7 +125,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setUser(null);
     Storage.clearSession();
-    isDataLoaded.current = false;
+    setIsDataLoaded(false);
     setEvents([]);
     setTodos([]);
     window.location.reload();
@@ -152,11 +152,13 @@ const App: React.FC = () => {
       description: newEvent.description
     };
 
+    console.warn("[App] User adding event:", item);
+
     if (Utils.checkForConflicts(item, events)) {
        if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
     }
 
-    setEvents([...events, item]);
+    setEvents(prev => [...prev, item]);
     setShowAddModal(false);
     setNewEvent({ type: 'course', startTime: '', endTime: '' });
   };
@@ -302,10 +304,16 @@ const App: React.FC = () => {
               <input className="w-full border p-2 rounded text-sm" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
               <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={newEvent.textbook || ''} onChange={e => setNewEvent({...newEvent, textbook: e.target.value})} />
               <div className="grid grid-cols-2 gap-2">
-                <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
-                <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Start</label>
+                  <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
+                </div>
+                <div>
+                   <label className="text-xs text-gray-500 block mb-1">End</label>
+                   <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
+                </div>
               </div>
-              <div className="flex gap-2 mt-4"><button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button><button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded">Add</button></div>
+              <div className="flex gap-2 mt-4"><button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button><button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add</button></div>
             </form>
           </div>
         </div>
