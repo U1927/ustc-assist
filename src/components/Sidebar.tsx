@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { TodoItem } from '../types';
-import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, CloudDownload } from 'lucide-react';
+import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings } from 'lucide-react';
 import { format, isPast } from 'date-fns';
 
 interface SidebarProps {
@@ -11,7 +11,6 @@ interface SidebarProps {
   onDeleteTodo: (id: string) => void;
   onGeneratePlan: () => void;
   onOpenSettings: () => void;
-  onImportData: () => void;
   conflicts: string[];
   isLoadingAI: boolean;
 }
@@ -23,7 +22,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteTodo, 
   onGeneratePlan,
   onOpenSettings,
-  onImportData,
   conflicts,
   isLoadingAI
 }) => {
@@ -129,25 +127,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <Check size={16} /> No schedule conflicts
               </div>
             )}
-
-            <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Sync Data</h3>
-              
-              <button 
-                onClick={onImportData}
-                disabled={isLoadingAI}
-                className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2 px-3 rounded text-sm transition"
-              >
-                {isLoadingAI ? <span className="animate-pulse">Connecting...</span> : (
-                  <>
-                   <CloudDownload size={16} /> Sync from JW
-                  </>
-                )}
-              </button>
-              <p className="text-[10px] text-gray-400 mt-1">
-                Attempts to fetch data from https://jw.ustc.edu.cn/for-std/course-take-query/index/502950
-              </p>
-            </div>
 
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Smart Assistant</h3>
