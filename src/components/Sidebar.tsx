@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+
+import React, { useState } from 'react';
 import { TodoItem } from '../types';
-import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, Upload } from 'lucide-react';
+import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, CloudDownload } from 'lucide-react';
 import { format, isPast } from 'date-fns';
 
 interface SidebarProps {
@@ -10,7 +11,7 @@ interface SidebarProps {
   onDeleteTodo: (id: string) => void;
   onGeneratePlan: () => void;
   onOpenSettings: () => void;
-  onImportScheduleFile: (file: File) => void;
+  onImportData: () => void;
   conflicts: string[];
   isLoadingAI: boolean;
 }
@@ -22,14 +23,13 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteTodo, 
   onGeneratePlan,
   onOpenSettings,
-  onImportScheduleFile,
+  onImportData,
   conflicts,
   isLoadingAI
 }) => {
   const [newTodo, setNewTodo] = useState('');
   const [deadline, setDeadline] = useState('');
   const [activeTab, setActiveTab] = useState<'todos' | 'tools'>('todos');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleAdd = (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,16 +37,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       onAddTodo(newTodo, deadline || undefined);
       setNewTodo('');
       setDeadline('');
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onImportScheduleFile(e.target.files[0]);
-    }
-    // Reset input so same file can be selected again if needed
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
     }
   };
 
@@ -141,29 +131,21 @@ const Sidebar: React.FC<SidebarProps> = ({
             )}
 
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Schedule Actions</h3>
-              
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-                accept="image/*,application/pdf"
-              />
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Sync Data</h3>
               
               <button 
-                onClick={() => fileInputRef.current?.click()}
+                onClick={onImportData}
                 disabled={isLoadingAI}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2 px-3 rounded text-sm transition"
               >
-                {isLoadingAI ? <span className="animate-pulse">Processing...</span> : (
+                {isLoadingAI ? <span className="animate-pulse">Connecting...</span> : (
                   <>
-                   <Upload size={16} /> Import from Image/PDF
+                   <CloudDownload size={16} /> Sync from JW
                   </>
                 )}
               </button>
               <p className="text-[10px] text-gray-400 mt-1">
-                Upload a screenshot or PDF of your USTC schedule. AI will parse it.
+                Attempts to fetch data from https://jw.ustc.edu.cn/for-std/course-take-query/index/502950
               </p>
             </div>
 
