@@ -40,7 +40,6 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
-      {/* Tabs */}
       <div className="flex border-b border-gray-200">
         <button 
           onClick={() => setActiveTab('todos')}
@@ -142,9 +141,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </>
                 )}
               </button>
-              <p className="text-[10px] text-gray-400 mt-1">
-                Uses Gemini AI to organize your study blocks.
-              </p>
             </div>
 
              <div>
@@ -155,15 +151,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               >
                 <Settings size={16} /> Preferences
               </button>
-            </div>
-
-            <div className="pt-4 border-t border-gray-100">
-               <h3 className="text-sm font-semibold text-gray-700 mb-2">Quick Links</h3>
-               <div className="flex flex-col gap-2 text-xs text-blue-600 underline">
-                 <a href="https://jw.ustc.edu.cn" target="_blank" rel="noreferrer">Academic Affairs (JW)</a>
-                 <a href="https://young.ustc.edu.cn" target="_blank" rel="noreferrer">Second Classroom (Young)</a>
-                 <a href="https://bb.ustc.edu.cn" target="_blank" rel="noreferrer">Blackboard (BB)</a>
-               </div>
             </div>
           </div>
         )}
