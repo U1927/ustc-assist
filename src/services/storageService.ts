@@ -90,6 +90,39 @@ export const loginUser = async (studentId: string, password: string): Promise<{ 
   }
 };
 
+/**
+ * Change Password
+ */
+export const changePassword = async (studentId: string, oldPass: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
+  if (!supabase) return { success: false, error: "Database disconnected" };
+
+  try {
+    // 1. Verify old password
+    const { data, error: fetchError } = await supabase
+      .from('user_data')
+      .select('password')
+      .eq('student_id', studentId)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+    if (!data) return { success: false, error: "User not found" };
+    if (data.password !== oldPass) return { success: false, error: "Incorrect current password" };
+
+    // 2. Update password
+    const { error: updateError } = await supabase
+      .from('user_data')
+      .update({ password: newPass })
+      .eq('student_id', studentId);
+
+    if (updateError) throw updateError;
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Change Password Error:", err);
+    return { success: false, error: err.message };
+  }
+};
+
 export const fetchUserData = async (studentId: string): Promise<{ schedule: ScheduleItem[], todos: TodoItem[] } | null> => {
   if (!supabase) {
     console.error("Supabase client not initialized! Check .env");
@@ -148,6 +181,3 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
     return { success: false, error: err.message };
   }
 };
-
-// Deprecated stubs
-export const loginOrRegisterCAS = async () => ({ success: false });
