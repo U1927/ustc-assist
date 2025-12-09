@@ -1,16 +1,17 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-console.log("[Supabase] Initializing Client...");
+console.warn("[Supabase] Module loading...");
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error("[Supabase] MISSING ENV VARIABLES! Check your .env file or Vercel Settings.");
-  console.error("Required: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY");
+  console.error("[Supabase] CRITICAL ERROR: Missing Environment Variables!");
+  console.error("VITE_SUPABASE_URL:", supabaseUrl);
+  console.error("VITE_SUPABASE_ANON_KEY:", supabaseKey ? "Set (Hidden)" : "Missing");
 } else {
-  console.log("[Supabase] URL found:", supabaseUrl);
+  console.log("[Supabase] Configuration loaded. URL:", supabaseUrl);
 }
 
 export const supabase = (supabaseUrl && supabaseKey) 
