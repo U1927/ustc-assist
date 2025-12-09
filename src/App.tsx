@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
@@ -13,6 +14,8 @@ import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-f
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
 
 const App: React.FC = () => {
+  console.log("[App] Rendering..."); // Verify App is running
+
   const [user, setUser] = useState<UserProfile | null>(null);
   const [events, setEvents] = useState<ScheduleItem[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
@@ -24,16 +27,14 @@ const App: React.FC = () => {
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
-  
-  // Status Bar State
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   
-  // Track if data is initialized to prevent overwriting cloud data with empty local state
+  // Prevent overwriting cloud data with empty local state on init
   const isDataLoaded = useRef(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
-  // 1. Initialize User Session
+  // 1. Initialize & Load Session
   useEffect(() => {
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -46,11 +47,10 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // 2. Load Cloud Data Helper
+  // 2. Cloud Data Loading
   const loadCloudData = async (studentId: string) => {
     setIsLoadingData(true);
     setSyncStatus('syncing');
-    console.log("[App] Loading cloud data for:", studentId);
     
     const cloudData = await Storage.fetchUserData(studentId);
     
@@ -59,27 +59,23 @@ const App: React.FC = () => {
       setTodos(cloudData.todos);
       isDataLoaded.current = true;
       setSyncStatus('idle');
-      console.log("[App] Cloud data loaded successfully.");
     } else {
-      // If fetch fails (network) or returns null, we mark loaded as true but empty 
-      // to allow user to start fresh. 
-      // Ideally we would differentiate between "New User" (empty) and "Network Error".
-      // For now, we assume if it fails, we let the user work locally and retry save later.
-      isDataLoaded.current = true; 
+      // Failed to load or new user
       setSyncStatus('error');
-      console.warn("[App] Cloud load failed or empty. Starting with empty state.");
+      // We set loaded to true anyway so user can start adding items locally if offline
+      isDataLoaded.current = true;
     }
     setIsLoadingData(false);
   };
 
-  // 3. Auto-Save to Cloud on Changes
+  // 3. Auto-Save to Cloud
   useEffect(() => {
+    // Only save if we are logged in AND data has been loaded initially
     if (!user || !isDataLoaded.current) return;
 
     const saveData = async () => {
       setSyncStatus('syncing');
       const success = await Storage.saveUserData(user.studentId, events, todos);
-      
       if (success) {
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
@@ -88,64 +84,18 @@ const App: React.FC = () => {
       }
     };
 
-    // Trigger save immediately on change
     saveData();
     
-    // Check Conflicts locally
+    // Check conflicts locally
     const conflictList = Utils.getConflicts(events);
     setConflicts(conflictList);
 
   }, [events, todos, user]);
 
-  // 4. Save User Session Changes locally (just login state)
+  // 4. Save Session Locally (Login state only)
   useEffect(() => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
-
-  // 5. Reminders & Expiration Logic
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!user) return;
-      const now = new Date();
-
-      // Reminders
-      events.forEach(event => {
-        const start = new Date(event.startTime);
-        const diffMinutes = differenceInMinutes(start, now);
-        
-        if (diffMinutes === user.settings.reminderMinutesBefore) {
-          sendNotification(`Upcoming: ${event.title}`, `Starts in ${diffMinutes} minutes at ${event.location}`);
-        }
-
-        const isEightAM = start.getHours() === 8 && start.getMinutes() === 0;
-        if (user.settings.earlyEightReminder && isEightAM && diffMinutes === 30) {
-           sendNotification(`🌅 早八提醒: ${event.title}`, `Get ready! Class starts at 8:00 AM.`);
-        }
-      });
-      
-      // Todo Expiration
-      let hasUpdates = false;
-      const updatedTodos = todos.map(todo => {
-        if (!todo.isCompleted && !todo.isExpired && todo.deadline && isPast(new Date(todo.deadline))) {
-          hasUpdates = true;
-          return { ...todo, isExpired: true };
-        }
-        return todo;
-      });
-      
-      if (hasUpdates) {
-        setTodos(updatedTodos);
-      }
-    }, 30000); 
-
-    return () => clearInterval(interval);
-  }, [events, user, todos]);
-
-  const sendNotification = (title: string, body: string) => {
-    if (Notification.permission === 'granted') {
-      new Notification(title, { body, icon: 'https://www.ustc.edu.cn/favicon.ico' });
-    }
-  };
 
   // Handlers
   const handleLogin = (loggedInUser: UserProfile) => {
@@ -184,7 +134,7 @@ const App: React.FC = () => {
     };
 
     if (Utils.checkForConflicts(item, events)) {
-       if (!confirm("⚠️ Conflict detected! This overlaps with an existing event. Add anyway?")) return;
+       if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
     }
 
     setEvents([...events, item]);
@@ -201,12 +151,11 @@ const App: React.FC = () => {
   const handleGeneratePlan = async () => {
     setIsLoadingAI(true);
     const topics = todos.filter(t => !t.isCompleted).map(t => t.content).join(", ") || "General Revision";
-    
     const newPlan = await generateStudyPlan(events, topics);
     if (newPlan.length > 0) {
        setEvents(prev => [...prev, ...newPlan]);
     } else {
-       alert("Could not generate a plan. Ensure API Key is set.");
+       alert("Could not generate a plan. Check API Key.");
     }
     setIsLoadingAI(false);
   };
@@ -239,17 +188,12 @@ const App: React.FC = () => {
      }
   };
 
-  // Render Status Bar Helper
   const renderSyncStatus = () => {
     switch(syncStatus) {
-      case 'syncing':
-        return <div className="flex items-center gap-1 text-blue-600"><Loader2 className="animate-spin" size={12} /> <span className="text-xs">Syncing...</span></div>;
-      case 'saved':
-        return <div className="flex items-center gap-1 text-green-600"><CheckCircle size={12} /> <span className="text-xs">Cloud Saved</span></div>;
-      case 'error':
-        return <div className="flex items-center gap-1 text-red-600 font-bold"><AlertCircle size={12} /> <span className="text-xs">Save Failed!</span></div>;
-      default: // idle
-        return <div className="flex items-center gap-1 text-gray-400"><Cloud size={12} /> <span className="text-xs">Cloud Ready</span></div>;
+      case 'syncing': return <span className="flex items-center gap-1 text-blue-600 text-xs"><Loader2 className="animate-spin" size={12}/> Syncing...</span>;
+      case 'saved': return <span className="flex items-center gap-1 text-green-600 text-xs"><CheckCircle size={12}/> Cloud Saved</span>;
+      case 'error': return <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><AlertCircle size={12}/> Save Failed</span>;
+      default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Ready</span>;
     }
   };
 
@@ -259,59 +203,30 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-slate-800">
-      
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm z-10">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-blue-900 tracking-tight flex items-center gap-2">
-              <span className="bg-blue-900 text-white p-1 rounded text-xs">USTC</span>
-              Assistant
+              <span className="bg-blue-900 text-white p-1 rounded text-xs">USTC</span> Assistant
             </h1>
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <button 
-                onClick={() => setViewMode(ViewMode.WEEK)}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}
-              >
-                Week
-              </button>
-              <button 
-                onClick={() => setViewMode(ViewMode.MONTH)}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}
-              >
-                Month
-              </button>
+              <button onClick={() => setViewMode(ViewMode.WEEK)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Week</button>
+              <button onClick={() => setViewMode(ViewMode.MONTH)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Month</button>
             </div>
-            
             <div className="flex items-center gap-2">
               <button onClick={() => navigateDate('prev')} className="p-1 hover:bg-gray-100 rounded"><ChevronLeft size={20} /></button>
-              <span className="text-sm font-semibold w-32 text-center">
-                {viewMode === ViewMode.WEEK ? 
-                  `Week of ${format(currentDate, 'MMM d')}` : 
-                  format(currentDate, 'MMMM yyyy')}
-              </span>
+              <span className="text-sm font-semibold w-32 text-center">{viewMode === ViewMode.WEEK ? `Week of ${format(currentDate, 'MMM d')}` : format(currentDate, 'MMMM yyyy')}</span>
               <button onClick={() => navigateDate('next')} className="p-1 hover:bg-gray-100 rounded"><ChevronRight size={20} /></button>
             </div>
           </div>
-
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-2 text-sm text-gray-600">
                <span className="font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{user.studentId}</span>
                <span className="font-medium">{user.name}</span>
              </div>
-             <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition">
-               <Plus size={16} /> New
-             </button>
-             <button 
-               onClick={() => setShowSettingsModal(true)} 
-               className="text-gray-400 hover:text-blue-600 transition p-1 rounded-full hover:bg-gray-100"
-               title="Preferences"
-             >
-               <Settings size={20} />
-             </button>
-             <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition p-1 rounded-full hover:bg-gray-100" title="Logout">
-               <LogOut size={20} />
-             </button>
+             <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition"><Plus size={16} /> New</button>
+             <button onClick={() => setShowSettingsModal(true)} className="text-gray-400 hover:text-blue-600 p-1"><Settings size={20} /></button>
+             <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 p-1"><LogOut size={20} /></button>
           </div>
         </header>
 
@@ -325,16 +240,9 @@ const App: React.FC = () => {
              </div>
           ) : (
             <div className="flex-1 overflow-hidden">
-               <CalendarView 
-                 mode={viewMode}
-                 currentDate={currentDate}
-                 events={events}
-                 onDeleteEvent={handleDeleteEvent}
-               />
+               <CalendarView mode={viewMode} currentDate={currentDate} events={events} onDeleteEvent={handleDeleteEvent} />
             </div>
           )}
-          
-          {/* Status Bar */}
           <div className="h-6 mt-1 flex items-center justify-end px-2 bg-gray-50 border-t border-gray-200 rounded-b-lg">
              {renderSyncStatus()}
           </div>
@@ -352,80 +260,27 @@ const App: React.FC = () => {
         isLoadingAI={isLoadingAI}
       />
 
-      <SettingsDialog 
-        isOpen={showSettingsModal}
-        onClose={() => setShowSettingsModal(false)}
-        settings={user.settings}
-        onSave={handleUpdateSettings}
-      />
+      <SettingsDialog isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} settings={user.settings} onSave={handleUpdateSettings} />
 
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl p-6 w-96 animate-in fade-in zoom-in duration-200">
             <h2 className="text-lg font-bold mb-4 text-gray-800">Add Schedule Item</h2>
             <form onSubmit={handleAddEvent} className="space-y-3">
-              <input 
-                className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" 
-                placeholder="Title (e.g. Calculus)" 
-                required
-                value={newEvent.title || ''}
-                onChange={e => setNewEvent({...newEvent, title: e.target.value})}
-              />
-              <select 
-                className="w-full border p-2 rounded text-sm outline-none"
-                value={newEvent.type}
-                onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}
-              >
-                <option value="course">First Classroom (Course)</option>
-                <option value="activity">Second Classroom (Activity)</option>
+              <input className="w-full border p-2 rounded text-sm" placeholder="Title" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
+              <select className="w-full border p-2 rounded text-sm" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
+                <option value="course">Course</option>
+                <option value="activity">Activity</option>
                 <option value="exam">Exam</option>
-                <option value="study">Self Study</option>
+                <option value="study">Study</option>
               </select>
-              <input 
-                className="w-full border p-2 rounded text-sm outline-none" 
-                placeholder="Location (e.g. 3A201)" 
-                value={newEvent.location || ''}
-                onChange={e => setNewEvent({...newEvent, location: e.target.value})}
-              />
-              <input 
-                className="w-full border p-2 rounded text-sm outline-none" 
-                placeholder="Textbook/Materials" 
-                value={newEvent.textbook || ''}
-                onChange={e => setNewEvent({...newEvent, textbook: e.target.value})}
-              />
-              <textarea 
-                className="w-full border p-2 rounded text-sm outline-none resize-none h-20" 
-                placeholder="Description / Notes" 
-                value={newEvent.description || ''}
-                onChange={e => setNewEvent({...newEvent, description: e.target.value})}
-              />
+              <input className="w-full border p-2 rounded text-sm" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
+              <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={newEvent.textbook || ''} onChange={e => setNewEvent({...newEvent, textbook: e.target.value})} />
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Start</label>
-                  <input 
-                    type="datetime-local" 
-                    required
-                    className="w-full border p-2 rounded text-xs"
-                    value={newEvent.startTime}
-                    onChange={e => setNewEvent({...newEvent, startTime: e.target.value})}
-                  />
-                </div>
-                <div>
-                   <label className="text-xs text-gray-500 block mb-1">End</label>
-                   <input 
-                    type="datetime-local" 
-                    required
-                    className="w-full border p-2 rounded text-xs"
-                    value={newEvent.endTime}
-                    onChange={e => setNewEvent({...newEvent, endTime: e.target.value})}
-                  />
-                </div>
+                <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
+                <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
               </div>
-
-              <div className="flex gap-2 mt-4 pt-2 border-t">
-                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">Cancel</button>
-                <button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add</button>
-              </div>
+              <div className="flex gap-2 mt-4"><button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button><button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded">Add</button></div>
             </form>
           </div>
         </div>
