@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { TodoItem } from '../types';
 import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings } from 'lucide-react';
@@ -113,7 +114,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           </>
         ) : (
           <div className="space-y-6">
-            {/* Conflicts */}
             {conflicts.length > 0 ? (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                  <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
@@ -129,7 +129,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
 
-            {/* AI Planner */}
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Smart Assistant</h3>
               <button 
@@ -148,7 +147,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </p>
             </div>
 
-            {/* Settings */}
              <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">System</h3>
               <button 
@@ -159,7 +157,6 @@ const Sidebar: React.FC<SidebarProps> = ({
               </button>
             </div>
 
-            {/* Links */}
             <div className="pt-4 border-t border-gray-100">
                <h3 className="text-sm font-semibold text-gray-700 mb-2">Quick Links</h3>
                <div className="flex flex-col gap-2 text-xs text-blue-600 underline">
