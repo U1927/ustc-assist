@@ -6,7 +6,7 @@ import SettingsDialog from './components/SettingsDialog';
 import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
-import { generateStudyPlan } from './services/aiService';
+import { generateStudyPlan, parseScheduleFromImage } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
@@ -30,7 +30,7 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V3 (Fixed 406)");
+    console.log("App Version: Cloud V4 (AI Image Import)");
     
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -174,6 +174,32 @@ const App: React.FC = () => {
     setIsLoadingAI(false);
   };
 
+  const handleImportScheduleImage = async (file: File) => {
+    setIsLoadingAI(true);
+    try {
+      const parsedEvents = await parseScheduleFromImage(file);
+      if (parsedEvents.length > 0) {
+        // Filter out duplicates (simple ID check won't work for new items, so checking title+start)
+        const currentEventSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
+        const newUniqueEvents = parsedEvents.filter(e => !currentEventSignatures.has(`${e.title}-${e.startTime}`));
+        
+        if (newUniqueEvents.length > 0) {
+          setEvents(prev => [...prev, ...newUniqueEvents]);
+          alert(`Successfully imported ${newUniqueEvents.length} courses from the image!\n\nNote: They have been mapped to the current week.`);
+        } else {
+          alert("Parsed image successfully, but all courses appear to be duplicates of existing ones.");
+        }
+      } else {
+        alert("AI processed the image but found no courses. Please ensure the image is clear.");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Failed to parse image. Ensure your API Key is valid and the image is readable.");
+    } finally {
+      setIsLoadingAI(false);
+    }
+  };
+
   const handleAddTodo = (content: string, deadline?: string) => {
     const todo: TodoItem = {
       id: crypto.randomUUID(),
@@ -230,6 +256,12 @@ const App: React.FC = () => {
               <span className="text-sm font-semibold w-32 text-center">{viewMode === ViewMode.WEEK ? `Week of ${format(currentDate, 'MMM d')}` : format(currentDate, 'MMMM yyyy')}</span>
               <button onClick={() => navigateDate('next')} className="p-1 hover:bg-gray-100 rounded"><ChevronRight size={20} /></button>
             </div>
+            <button 
+               onClick={() => setCurrentDate(new Date())}
+               className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 hover:bg-blue-100"
+            >
+              Today
+            </button>
           </div>
           <div className="flex items-center gap-4">
              <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -259,6 +291,7 @@ const App: React.FC = () => {
         onDeleteTodo={handleDeleteTodo}
         onGeneratePlan={handleGeneratePlan}
         onOpenSettings={() => setShowSettingsModal(true)}
+        onImportScheduleImage={handleImportScheduleImage}
         conflicts={conflicts}
         isLoadingAI={isLoadingAI}
       />
