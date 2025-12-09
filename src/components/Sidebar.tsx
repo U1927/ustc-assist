@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { TodoItem } from '../types';
-import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, Upload, Image as ImageIcon } from 'lucide-react';
+import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, Upload } from 'lucide-react';
 import { format, isPast } from 'date-fns';
 
 interface SidebarProps {
@@ -10,7 +10,7 @@ interface SidebarProps {
   onDeleteTodo: (id: string) => void;
   onGeneratePlan: () => void;
   onOpenSettings: () => void;
-  onImportScheduleImage: (file: File) => void;
+  onImportScheduleFile: (file: File) => void;
   conflicts: string[];
   isLoadingAI: boolean;
 }
@@ -22,7 +22,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteTodo, 
   onGeneratePlan,
   onOpenSettings,
-  onImportScheduleImage,
+  onImportScheduleFile,
   conflicts,
   isLoadingAI
 }) => {
@@ -42,7 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      onImportScheduleImage(e.target.files[0]);
+      onImportScheduleFile(e.target.files[0]);
     }
     // Reset input so same file can be selected again if needed
     if (fileInputRef.current) {
@@ -148,7 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 ref={fileInputRef} 
                 onChange={handleFileChange} 
                 className="hidden" 
-                accept="image/*"
+                accept="image/*,application/pdf"
               />
               
               <button 
@@ -158,12 +158,12 @@ const Sidebar: React.FC<SidebarProps> = ({
               >
                 {isLoadingAI ? <span className="animate-pulse">Processing...</span> : (
                   <>
-                   <ImageIcon size={16} /> Import from Image (OCR)
+                   <Upload size={16} /> Import from Image/PDF
                   </>
                 )}
               </button>
               <p className="text-[10px] text-gray-400 mt-1">
-                Upload a screenshot of your USTC schedule. AI will parse it.
+                Upload a screenshot or PDF of your USTC schedule. AI will parse it.
               </p>
             </div>
 
