@@ -110,6 +110,11 @@ const App: React.FC = () => {
     else alert(`Manual Sync Failed: ${result.error}`);
   };
 
+  const handleChangePassword = async (oldPass: string, newPass: string) => {
+    if (!user) return { success: false, error: "Not logged in" };
+    return await Storage.changePassword(user.studentId, oldPass, newPass);
+  };
+
   const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
@@ -271,6 +276,7 @@ const App: React.FC = () => {
         settings={user.settings} 
         onSave={handleUpdateSettings} 
         onForceSync={handleForceSync}
+        onChangePassword={handleChangePassword}
       />
 
       {showAddModal && (
