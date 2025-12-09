@@ -57,12 +57,18 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
   }
 };
 
-export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<boolean> => {
-  console.log(`[Storage] Saving data for ${studentId}...`);
+interface SaveResult {
+  success: boolean;
+  error?: string;
+}
+
+export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<SaveResult> => {
+  console.log(`[Storage] Attempting to save data for ${studentId}...`);
 
   if (!supabase) {
-    console.error("[Storage] Supabase client offline.");
-    return false;
+    const msg = "Client offline (No Env Vars)";
+    console.error(`[Storage] ${msg}`);
+    return { success: false, error: msg };
   }
 
   // Sanitize data (remove undefined) to avoid JSON errors
@@ -80,14 +86,14 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
       }, { onConflict: 'student_id' });
 
     if (error) {
-      console.error("[Storage] Save Error:", error);
-      return false;
+      console.error("[Storage] Supabase Save Error:", error);
+      return { success: false, error: error.message || error.details || "DB Error" };
     }
 
     console.log("[Storage] Save Successful!");
-    return true;
-  } catch (err) {
+    return { success: true };
+  } catch (err: any) {
     console.error("[Storage] Unexpected error during save:", err);
-    return false;
+    return { success: false, error: err.message || "Network/Unknown Error" };
   }
 };
