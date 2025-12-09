@@ -30,6 +30,8 @@ const App: React.FC = () => {
   
   // Track if data is initialized to prevent overwriting cloud data with empty local state
   const isDataLoaded = useRef(false);
+  // Track if initial load failed to prevent saving empty data over existing cloud data
+  const loadFailed = useRef(false);
 
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
 
@@ -56,11 +58,15 @@ const App: React.FC = () => {
       setEvents(cloudData.schedule);
       setTodos(cloudData.todos);
       isDataLoaded.current = true;
+      loadFailed.current = false;
       setSyncStatus('idle');
     } else {
-      // If error or no connection
-      isDataLoaded.current = true; // Still allow app usage
+      // If error or no connection, we still allow app usage but warn
+      // And we mark loadFailed to prevent auto-saving empty state over potential cloud data
+      isDataLoaded.current = true; 
+      loadFailed.current = true;
       setSyncStatus('error');
+      console.warn("Initial load failed. Auto-save is paused to protect data.");
     }
     setIsLoadingData(false);
   };
@@ -68,6 +74,20 @@ const App: React.FC = () => {
   // 3. Auto-Save to Cloud on Changes
   useEffect(() => {
     if (!user || !isDataLoaded.current) return;
+    
+    // Safety: If initial load failed, do not auto-save unless user explicitly knows
+    if (loadFailed.current) {
+        // Only allow save if user has added data (events/todos > 0) 
+        // which implies they are starting fresh or don't care about old data.
+        // For now, let's just log a warning and return to be safe.
+        // Or if the user really wants to save, they can reload.
+        if (events.length === 0 && todos.length === 0) return;
+        
+        // If we really want to support offline-first, we'd queue changes.
+        // Here we just warn to avoid corruption.
+        console.warn("Skipping auto-save because initial load failed.");
+        return;
+    }
 
     const saveData = async () => {
       setSyncStatus('syncing');
@@ -75,21 +95,19 @@ const App: React.FC = () => {
       
       if (success) {
         setSyncStatus('saved');
-        // Revert to idle after 2 seconds for a clean UI
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
         setSyncStatus('error');
       }
     };
 
-    // Debounce slightly to avoid spamming saves while typing
-    const timeoutId = setTimeout(saveData, 500);
+    // IMMEDIATE SAVE: Debounce removed to ensure reliability
+    saveData();
     
     // Check Conflicts locally
     const conflictList = Utils.getConflicts(events);
     setConflicts(conflictList);
 
-    return () => clearTimeout(timeoutId);
   }, [events, todos, user]);
 
   // 4. Save User Session Changes
@@ -152,6 +170,7 @@ const App: React.FC = () => {
     setUser(null);
     Storage.clearSession();
     isDataLoaded.current = false;
+    loadFailed.current = false;
     setEvents([]);
     setTodos([]);
     window.location.reload();
@@ -242,7 +261,7 @@ const App: React.FC = () => {
       case 'saved':
         return <div className="flex items-center gap-1 text-green-600"><CheckCircle size={12} /> <span className="text-xs">Cloud Saved</span></div>;
       case 'error':
-        return <div className="flex items-center gap-1 text-red-600"><AlertCircle size={12} /> <span className="text-xs">Sync Error (Check Console)</span></div>;
+        return <div className="flex items-center gap-1 text-red-600 font-bold"><AlertCircle size={12} /> <span className="text-xs">Save Failed! (Check Console)</span></div>;
       default: // idle
         return <div className="flex items-center gap-1 text-gray-400"><Cloud size={12} /> <span className="text-xs">Ready</span></div>;
     }
