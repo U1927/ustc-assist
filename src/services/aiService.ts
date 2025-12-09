@@ -13,13 +13,13 @@ const startOfWeek = (date: Date, options?: { weekStartsOn?: number }) => {
   return d;
 };
 
-// Helper to convert File to Base64
+// Helper to convert File to Base64 (works for Image and PDF)
 const fileToGenerativePart = async (file: File): Promise<{ inlineData: { data: string; mimeType: string } }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64String = reader.result as string;
-      // Remove the "data:image/jpeg;base64," prefix
+      // Remove the "data:<mime>;base64," prefix
       const base64Data = base64String.split(',')[1];
       resolve({
         inlineData: {
@@ -105,15 +105,15 @@ export const generateStudyPlan = async (
   }
 };
 
-export const parseScheduleFromImage = async (imageFile: File): Promise<ScheduleItem[]> => {
+export const parseScheduleFromFile = async (file: File): Promise<ScheduleItem[]> => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    alert("API Key is missing. Cannot process image.");
+    alert("API Key is missing. Cannot process file.");
     return [];
   }
 
   const ai = new GoogleGenAI({ apiKey: apiKey });
-  const imagePart = await fileToGenerativePart(imageFile);
+  const filePart = await fileToGenerativePart(file);
 
   // Calculate dates for the current week to help AI map "Monday" to an actual date
   const today = new Date();
@@ -125,7 +125,7 @@ export const parseScheduleFromImage = async (imageFile: File): Promise<ScheduleI
 
   const prompt = `
     You are an intelligent assistant for a USTC student.
-    Analyze the attached image of a course schedule (Chinese: 中国科学技术大学学生课表).
+    Analyze the attached file (image or PDF) of a course schedule (Chinese: 中国科学技术大学学生课表).
     
     Task: Extract all courses and convert them into a JSON schedule for the CURRENT WEEK.
     
@@ -153,7 +153,7 @@ export const parseScheduleFromImage = async (imageFile: File): Promise<ScheduleI
       model: "gemini-2.5-flash",
       contents: {
         parts: [
-          imagePart,
+          filePart,
           { text: prompt }
         ]
       },
@@ -194,7 +194,7 @@ export const parseScheduleFromImage = async (imageFile: File): Promise<ScheduleI
     }));
 
   } catch (error) {
-    console.error("AI Image Parsing failed:", error);
+    console.error("AI File Parsing failed:", error);
     throw error;
   }
 };
