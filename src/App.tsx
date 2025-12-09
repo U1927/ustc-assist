@@ -69,8 +69,9 @@ const App: React.FC = () => {
         setSyncStatus('idle');
       }
       setIsDataLoaded(true); // Allow saving after load attempt
-    } catch (e) {
+    } catch (e: any) {
       console.error("[App] Load Crash:", e);
+      alert("Failed to load data from Cloud: " + e.message);
       setIsDataLoaded(true); 
     } finally {
       setIsLoadingData(false);
@@ -79,8 +80,12 @@ const App: React.FC = () => {
 
   // 3. Auto-Save to Cloud
   useEffect(() => {
-    // Only save if logged in AND data has been loaded initially
-    if (!user || !isDataLoaded) return;
+    // Debug logging for why save might be skipped
+    if (!user) return; 
+    if (!isDataLoaded) {
+      console.log("[App] Skipping save: Data not loaded yet.");
+      return;
+    }
 
     const saveData = async () => {
       console.warn(`[App] Auto-save triggered.`);
@@ -96,6 +101,8 @@ const App: React.FC = () => {
         console.error("[App] Save Failed:", result.error);
         setSyncStatus('error');
         setErrorMessage(result.error || "Error");
+        // FORCE ALERT ON FAILURE
+        alert(`❌ Data Save Failed!\nReason: ${result.error}\n\nPlease check your internet or database settings.`);
       }
     };
 
