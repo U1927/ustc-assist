@@ -1,11 +1,12 @@
+
 import { ScheduleItem, TodoItem, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 
 const KEYS = {
-  USER: 'ustc_assist_user',
+  USER: 'ustc_assist_user_session',
 };
 
-// --- Session Management (Local Only) ---
+// --- Session Management (Keep Login State Local) ---
 export const saveUserSession = (user: UserProfile) => {
   localStorage.setItem(KEYS.USER, JSON.stringify(user));
 };
@@ -19,12 +20,13 @@ export const clearSession = () => {
   localStorage.clear();
 };
 
-// --- Cloud Data Operations ---
+// --- Cloud Data Operations (Supabase) ---
 
 export const fetchUserData = async (studentId: string): Promise<{ schedule: ScheduleItem[], todos: TodoItem[] } | null> => {
-  console.log(`[Supabase] Fetching data for user: ${studentId}...`);
+  console.log(`[Storage] Fetching cloud data for: ${studentId}`);
+  
   if (!supabase) {
-    console.warn("[Supabase] Client is null, cannot fetch.");
+    console.error("[Storage] Supabase client is not initialized.");
     return null;
   }
 
@@ -37,33 +39,33 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
 
     if (error) {
       if (error.code === 'PGRST116') {
-        console.log("[Supabase] User not found (New User), returning empty defaults.");
+        console.warn("[Storage] User not found in DB (New User). Returning empty data.");
         return { schedule: [], todos: [] };
       }
-      console.error("[Supabase] Fetch Error:", error);
+      console.error("[Storage] Fetch Error:", error.message);
       return null;
     }
 
-    console.log("[Supabase] Fetch Success:", data);
+    console.log("[Storage] Data loaded successfully:", data);
     return {
       schedule: data.schedule || [],
       todos: data.todos || []
     };
   } catch (err) {
-    console.error("[Supabase] Unexpected Fetch Exception:", err);
+    console.error("[Storage] Unexpected error during fetch:", err);
     return null;
   }
 };
 
 export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<boolean> => {
-  console.log(`[Supabase] Attempting save for ${studentId}. Events: ${schedule.length}, Todos: ${todos.length}`);
-  
+  console.log(`[Storage] Saving data for ${studentId}...`);
+
   if (!supabase) {
-    console.warn("[Supabase] Client is null, save skipped (Offline Mode).");
+    console.error("[Storage] Supabase client offline.");
     return false;
   }
 
-  // Sanitization: Ensure clean JSON (removes undefined, functions, etc)
+  // Sanitize data (remove undefined) to avoid JSON errors
   const cleanSchedule = JSON.parse(JSON.stringify(schedule));
   const cleanTodos = JSON.parse(JSON.stringify(todos));
 
@@ -78,18 +80,14 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
       }, { onConflict: 'student_id' });
 
     if (error) {
-      console.error("[Supabase] Save API Error:", error);
-      // Alert user about Policy error (RLS) specifically
-      if (error.code === '42501' || error.message.includes('row-level security')) {
-        console.error("CRITICAL: RLS Policy Violation. Please run the schema.sql again in Supabase.");
-      }
+      console.error("[Storage] Save Error:", error);
       return false;
     }
 
-    console.log("[Supabase] Save Success!");
+    console.log("[Storage] Save Successful!");
     return true;
   } catch (err) {
-    console.error("[Supabase] Unexpected Save Exception:", err);
+    console.error("[Storage] Unexpected error during save:", err);
     return false;
   }
 };
