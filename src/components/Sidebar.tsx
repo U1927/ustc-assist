@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { TodoItem } from '../types';
 import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings } from 'lucide-react';
