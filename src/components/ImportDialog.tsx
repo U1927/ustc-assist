@@ -85,8 +85,9 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         <div className="p-6 overflow-y-auto space-y-4">
           
           {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded flex items-center gap-2 text-sm border border-red-100 animate-pulse">
-              <AlertCircle size={16} /> {error}
+            <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-1 text-xs border border-red-100 animate-pulse">
+              <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> Error</div>
+              <div>{error}</div>
             </div>
           )}
 
@@ -97,8 +98,8 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                    <div>
                      <p className="font-bold">Connects to USTC CAS</p>
                      <p className="opacity-80 text-xs mt-1">
-                       This uses a secure proxy to log in to <code>passport.ustc.edu.cn</code> and fetch your schedule from <code>jw.ustc.edu.cn</code>. 
-                       Your password is sent directly to USTC and is <strong>not stored</strong>.
+                       This uses a secure proxy to log in to <code>passport.ustc.edu.cn</code>.
+                       If this fails, please use the <strong>Manual Paste</strong> tab, as the CAS system often blocks automated logins or requires a Captcha.
                      </p>
                    </div>
                 </div>
