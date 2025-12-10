@@ -1,3 +1,4 @@
+
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
@@ -47,12 +48,25 @@ export default async function handler(req, res) {
     sessionCookies = getCookies(loginPage);
     
     const $ = cheerio.load(loginPage.data);
+    const html = loginPage.data;
     
     // Robust selectors
-    // Some CAS versions use id="lt", others use name="lt", some drop it entirely
-    const lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
-    const execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
-    const eventId = $('input[name="_eventId"]').val() || 'submit';
+    let lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
+    let execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
+    let eventId = $('input[name="_eventId"]').val() || 'submit';
+
+    // REGEX FALLBACK (If selectors fail)
+    if (!lt) {
+        // Try finding name="lt" value="..."
+        const ltMatch = html.match(/name=["']lt["']\s+value=["'](.*?)["']/);
+        if (ltMatch) lt = ltMatch[1];
+    }
+    
+    if (!execution) {
+        // Try finding name="execution" value="..."
+        const execMatch = html.match(/name=["']execution["']\s+value=["'](.*?)["']/);
+        if (execMatch) execution = execMatch[1];
+    }
 
     // If both are missing, we likely hit a Captcha page, a WAF, or the page changed completely
     if (!lt && !execution) {
@@ -78,6 +92,9 @@ export default async function handler(req, res) {
     
     params.append('_eventId', eventId);
     params.append('button', '');
+    
+    // Add missing params sometimes required by newer CAS
+    params.append('warn', 'true');
 
     const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
       headers: {
@@ -127,9 +144,9 @@ export default async function handler(req, res) {
         headers: { 'Cookie': sessionCookies }
     });
     
-    const html = tablePageResponse.data;
-    const studentIdMatch = html.match(/studentId[:\s"']+(\d+)/);
-    const bizTypeIdMatch = html.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
+    const pageHtml = tablePageResponse.data;
+    const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
+    const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
     
     let apiUrl = '';
     if (studentIdMatch) {
@@ -138,7 +155,7 @@ export default async function handler(req, res) {
        apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
     } else {
        // Fallback: Check for embedded JSON
-       const activityMatch = html.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
+       const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
        if (activityMatch) {
            console.log('[API] Found embedded data in HTML.');
            try {
