@@ -8,10 +8,11 @@ import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './ty
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
-import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2 } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
+type AddMode = 'single' | 'course';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -20,6 +21,7 @@ const App: React.FC = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.WEEK);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('single');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   const [conflicts, setConflicts] = useState<string[]>([]);
@@ -27,11 +29,22 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'course', startTime: '', endTime: '' });
+  // Single Event Form
+  const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'activity', startTime: '', endTime: '' });
+
+  // Course Series Form
+  const [courseForm, setCourseForm] = useState({
+    title: '',
+    location: '',
+    textbook: '',
+    weekStart: 1,
+    weekEnd: 18,
+    schedule: [{ day: 1, periods: '3-4' }] as { day: number, periods: string }[]
+  });
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V10 (Standard Password Auth)");
+    console.log("App Version: Cloud V10.1 (USTC Course System)");
 
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -70,9 +83,6 @@ const App: React.FC = () => {
         setTimeout(() => setSyncStatus('idle'), 2000);
       } else {
         setSyncStatus('error');
-        if (result.error?.includes('policy') || result.error?.includes('401')) {
-          alert(`Cloud Save Failed: ${result.error}`);
-        }
       }
     }, 500);
 
@@ -133,7 +143,9 @@ const App: React.FC = () => {
     if (user) setUser({ ...user, settings: newSettings });
   };
 
-  const handleAddEvent = (e: React.FormEvent) => {
+  // --- ADD EVENT LOGIC ---
+
+  const handleAddSingleEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEvent.title || !newEvent.startTime || !newEvent.endTime) return;
 
@@ -154,7 +166,62 @@ const App: React.FC = () => {
 
     setEvents(prev => [...prev, item]);
     setShowAddModal(false);
-    setNewEvent({ type: 'course', startTime: '', endTime: '' });
+    setNewEvent({ type: 'activity', startTime: '', endTime: '' });
+  };
+
+  const handleAddCourseSeries = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.settings.semester) {
+      alert("Please configure semester start date in settings first!");
+      return;
+    }
+    if (!courseForm.title) {
+       alert("Course title is required");
+       return;
+    }
+
+    const { weekStart, weekEnd, schedule, title, location, textbook } = courseForm;
+    const { startDate } = user.settings.semester;
+    const newItems: ScheduleItem[] = [];
+
+    // Loop through weeks
+    for (let w = weekStart; w <= weekEnd; w++) {
+      // Loop through schedule slots (e.g. Mon 3-4, Wed 3-4)
+      schedule.forEach(slot => {
+        const { day, periods } = slot;
+        
+        // Find periods (e.g. 3-4 means start of 3, end of 4)
+        const [startP, endP] = periods.split('-').map(Number);
+        
+        if (Utils.USTC_TIME_SLOTS[startP] && Utils.USTC_TIME_SLOTS[endP]) {
+          const startTimeStr = Utils.USTC_TIME_SLOTS[startP].start;
+          const endTimeStr = Utils.USTC_TIME_SLOTS[endP].end;
+          
+          const startDt = Utils.calculateClassDate(startDate, w, day, startTimeStr);
+          const endDt = Utils.calculateClassDate(startDate, w, day, endTimeStr);
+
+          newItems.push({
+            id: crypto.randomUUID(),
+            title: title,
+            location: location || 'Classroom',
+            type: 'course',
+            startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
+            endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
+            textbook: textbook,
+            description: `Week ${w} Course`
+          });
+        }
+      });
+    }
+
+    // Basic Conflict Check (Just checking first item for speed/UX)
+    if (newItems.length > 0 && Utils.checkForConflicts(newItems[0], events)) {
+      if(!confirm(`Potential conflict detected in Week ${weekStart}. Add ${newItems.length} course sessions anyway?`)) return;
+    }
+
+    setEvents(prev => [...prev, ...newItems]);
+    setShowAddModal(false);
+    alert(`Added ${newItems.length} class sessions to the calendar.`);
   };
 
   const handleDeleteEvent = (id: string) => {
@@ -279,32 +346,135 @@ const App: React.FC = () => {
         onChangePassword={handleChangePassword}
       />
 
+      {/* NEW ADD MODAL */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-96 animate-in fade-in zoom-in duration-200">
-            <h2 className="text-lg font-bold mb-4 text-gray-800">Add Schedule Item</h2>
-            <form onSubmit={handleAddEvent} className="space-y-3">
-              <input className="w-full border p-2 rounded text-sm" placeholder="Title" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
-              <select className="w-full border p-2 rounded text-sm" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
-                <option value="course">Course</option>
-                <option value="activity">Activity</option>
-                <option value="exam">Exam</option>
-                <option value="study">Study</option>
-              </select>
-              <input className="w-full border p-2 rounded text-sm" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
-              <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={newEvent.textbook || ''} onChange={e => setNewEvent({...newEvent, textbook: e.target.value})} />
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-gray-500 block mb-1">Start</label>
-                  <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
-                </div>
-                <div>
-                   <label className="text-xs text-gray-500 block mb-1">End</label>
-                   <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4"><button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button><button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add</button></div>
-            </form>
+          <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full m-4 animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header & Tabs */}
+            <div className="flex border-b border-gray-200">
+              <button 
+                onClick={() => setAddMode('single')} 
+                className={`flex-1 py-3 text-sm font-bold ${addMode === 'single' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'bg-gray-50 text-gray-500'}`}
+              >
+                One-time Event
+              </button>
+              <button 
+                onClick={() => setAddMode('course')} 
+                className={`flex-1 py-3 text-sm font-bold ${addMode === 'course' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'bg-gray-50 text-gray-500'}`}
+              >
+                Add Course (Term)
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto">
+              {addMode === 'single' ? (
+                <form onSubmit={handleAddSingleEvent} className="space-y-3">
+                  <input className="w-full border p-2 rounded text-sm" placeholder="Title" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
+                  <select className="w-full border p-2 rounded text-sm" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
+                    <option value="activity">Activity</option>
+                    <option value="exam">Exam</option>
+                    <option value="study">Study</option>
+                    <option value="course">Makeup Class</option>
+                  </select>
+                  <input className="w-full border p-2 rounded text-sm" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">Start</label>
+                      <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-500 block mb-1">End</label>
+                      <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-4 pt-2 border-t">
+                     <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button>
+                     <button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Event</button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleAddCourseSeries} className="space-y-4">
+                  <div>
+                    <input className="w-full border p-2 rounded text-sm font-medium" placeholder="Course Name (e.g. Math Analysis)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                     <input className="w-full border p-2 rounded text-sm" placeholder="Location (e.g. 3A201)" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} />
+                     <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} />
+                  </div>
+                  
+                  {/* Weeks */}
+                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                     <label className="text-xs font-bold text-blue-700 mb-2 block">Teaching Weeks (Semester: {user?.settings.semester?.name || 'Default'})</label>
+                     <div className="flex items-center gap-2">
+                       <span className="text-sm">Week</span>
+                       <input type="number" min={1} max={20} className="w-14 text-center border p-1 rounded text-sm" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} />
+                       <span className="text-sm">to</span>
+                       <input type="number" min={1} max={20} className="w-14 text-center border p-1 rounded text-sm" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} />
+                     </div>
+                  </div>
+
+                  {/* Schedule List */}
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                       <label className="text-xs font-bold text-gray-600 uppercase">Class Sessions</label>
+                       <button 
+                         type="button" 
+                         onClick={() => setCourseForm({...courseForm, schedule: [...courseForm.schedule, { day: 1, periods: '3-4' }]})}
+                         className="text-xs bg-gray-100 px-2 py-1 rounded text-blue-600 hover:bg-blue-50 font-medium"
+                       >
+                         + Add Slot
+                       </button>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                       {courseForm.schedule.map((slot, idx) => (
+                         <div key={idx} className="flex items-center gap-2">
+                           <select 
+                             className="flex-1 border p-1.5 rounded text-sm"
+                             value={slot.day}
+                             onChange={e => {
+                               const newSchedule = [...courseForm.schedule];
+                               newSchedule[idx].day = Number(e.target.value);
+                               setCourseForm({...courseForm, schedule: newSchedule});
+                             }}
+                           >
+                             <option value={1}>Monday</option>
+                             <option value={2}>Tuesday</option>
+                             <option value={3}>Wednesday</option>
+                             <option value={4}>Thursday</option>
+                             <option value={5}>Friday</option>
+                             <option value={6}>Saturday</option>
+                             <option value={7}>Sunday</option>
+                           </select>
+                           <select 
+                              className="w-24 border p-1.5 rounded text-sm"
+                              value={slot.periods}
+                              onChange={e => {
+                                 const newSchedule = [...courseForm.schedule];
+                                 newSchedule[idx].periods = e.target.value;
+                                 setCourseForm({...courseForm, schedule: newSchedule});
+                              }}
+                           >
+                             {Utils.COMMON_PERIODS.map(p => (
+                               <option key={p.label} value={`${p.start}-${p.end}`}>{p.label}</option>
+                             ))}
+                           </select>
+                           {courseForm.schedule.length > 1 && (
+                             <button type="button" onClick={() => setCourseForm({...courseForm, schedule: courseForm.schedule.filter((_, i) => i !== idx)})} className="text-gray-400 hover:text-red-500">
+                               <Trash2 size={16} />
+                             </button>
+                           )}
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t">
+                     <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button>
+                     <button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Course Series</button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         </div>
       )}
