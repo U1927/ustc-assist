@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { Save, Sliders, X, CloudLightning, Lock } from 'lucide-react';
+import { Save, Sliders, X, CloudLightning, Lock, Calendar } from 'lucide-react';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -77,7 +77,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full m-4 flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
+      <div className="bg-white rounded-xl shadow-2xl w-[500px] max-w-full m-4 flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b">
            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
              <Sliders size={20} className="text-blue-600"/> Preferences
@@ -86,35 +86,86 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
         </div>
 
         <div className="p-6 space-y-6 overflow-y-auto">
-          {/* General Settings */}
-          <form id="settings-form" onSubmit={handleSubmit} className="space-y-4">
-            <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1">General</h3>
-            <div className="space-y-4">
-              <label className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-white transition cursor-pointer select-none">
-                <input 
-                  type="checkbox" 
-                  checked={formData.earlyEightReminder}
-                  onChange={e => setFormData({...formData, earlyEightReminder: e.target.checked})}
-                  className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
-                />
-                <div className="flex-1">
-                  <div className="text-sm font-bold text-gray-900">早八提醒 (Early 8 Alert)</div>
-                  <div className="text-xs text-gray-500">Get notified the night before 8:00 AM classes.</div>
-                </div>
-              </label>
+          <form id="settings-form" onSubmit={handleSubmit} className="space-y-6">
+            
+            {/* Semester Settings */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1 flex items-center gap-1">
+                <Calendar size={12}/> Academic Calendar
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                 <div>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">Semester Name</label>
+                   <input 
+                     type="text" 
+                     value={formData.semester?.name || ''}
+                     onChange={e => setFormData({
+                       ...formData, 
+                       semester: { ...formData.semester, name: e.target.value }
+                     })}
+                     className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                   />
+                 </div>
+                 <div>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">Total Weeks</label>
+                   <input 
+                     type="number" 
+                     value={formData.semester?.totalWeeks || 18}
+                     onChange={e => setFormData({
+                       ...formData, 
+                       semester: { ...formData.semester, totalWeeks: Number(e.target.value) }
+                     })}
+                     className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                   />
+                 </div>
+                 <div className="col-span-2">
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">Start Date (Monday of Week 1)</label>
+                   <input 
+                     type="date" 
+                     value={formData.semester?.startDate || ''}
+                     onChange={e => setFormData({
+                       ...formData, 
+                       semester: { ...formData.semester, startDate: e.target.value }
+                     })}
+                     className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                   />
+                   <p className="text-[10px] text-gray-400 mt-1">
+                     Determines the dates for "Week 1", "Week 2", etc.
+                   </p>
+                 </div>
+              </div>
+            </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Class Reminder</label>
-                <div className="flex items-center gap-2">
+            {/* Notifications */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1">Notifications</h3>
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-white transition cursor-pointer select-none">
                   <input 
-                    type="number" 
-                    min="0"
-                    max="120"
-                    value={formData.reminderMinutesBefore}
-                    onChange={e => setFormData({...formData, reminderMinutesBefore: Number(e.target.value)})}
-                    className="w-20 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 text-center"
+                    type="checkbox" 
+                    checked={formData.earlyEightReminder}
+                    onChange={e => setFormData({...formData, earlyEightReminder: e.target.checked})}
+                    className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
                   />
-                  <span className="text-sm text-gray-500">minutes before start</span>
+                  <div className="flex-1">
+                    <div className="text-sm font-bold text-gray-900">早八提醒 (Early 8 Alert)</div>
+                    <div className="text-xs text-gray-500">Get notified the night before 8:00 AM classes.</div>
+                  </div>
+                </label>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Class Reminder</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number" 
+                      min="0"
+                      max="120"
+                      value={formData.reminderMinutesBefore}
+                      onChange={e => setFormData({...formData, reminderMinutesBefore: Number(e.target.value)})}
+                      className="w-20 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 text-center"
+                    />
+                    <span className="text-sm text-gray-500">minutes before start</span>
+                  </div>
                 </div>
               </div>
             </div>
