@@ -1,3 +1,4 @@
+
 export type EventType = 'course' | 'activity' | 'exam' | 'study';
 
 export interface ScheduleItem {
@@ -20,9 +21,16 @@ export interface TodoItem {
   tags: string[];
 }
 
+export interface SemesterConfig {
+  name: string;       // e.g., "2024 Fall"
+  startDate: string;  // ISO Date string (YYYY-MM-DD) of the Monday of Week 1
+  totalWeeks: number; // e.g., 18
+}
+
 export interface AppSettings {
   earlyEightReminder: boolean;
   reminderMinutesBefore: number;
+  semester: SemesterConfig;
 }
 
 export interface UserProfile {
