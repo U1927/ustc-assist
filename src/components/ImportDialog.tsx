@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, FileJson, Check, AlertCircle, HelpCircle, Loader2, Globe, RefreshCw } from 'lucide-react';
+import { X, FileJson, Check, AlertCircle, HelpCircle, Loader2, Globe, RefreshCw, Terminal } from 'lucide-react';
 import { autoImportFromJw } from '../services/crawlerService';
 
 interface ImportDialogProps {
@@ -25,6 +25,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   const [loginContext, setLoginContext] = useState<any>(null);
   
   const [error, setError] = useState('');
+  const [debugInfo, setDebugInfo] = useState('');
 
   if (!isOpen) return null;
 
@@ -51,6 +52,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
     setIsLoading(true);
     setError('');
+    setDebugInfo('');
 
     try {
       // Pass captcha and context if we are in phase 2
@@ -82,9 +84,15 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       setCaptchaRequired(false);
       setCaptchaCode('');
       setLoginContext(null);
+      setDebugInfo('');
 
     } catch (err: any) {
       setError(err.message || "Login failed. Please try Manual Import.");
+      if (err.message && err.message.includes('HTML:')) {
+         // Attempt to extract debug info if present in error message string
+         // (Though usually we might pass it separately, here we rely on the error string for simplicity)
+         setDebugInfo(err.message); 
+      }
     } finally {
       setIsLoading(false);
     }
@@ -95,6 +103,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       setLoginContext(null);
       setCaptchaCode('');
       setError('');
+      setDebugInfo('');
   };
 
   return (
@@ -126,9 +135,15 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         <div className="p-6 overflow-y-auto space-y-4">
           
           {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-1 text-xs border border-red-100 animate-pulse">
+            <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-2 text-xs border border-red-100 animate-pulse">
               <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> System Message</div>
               <div>{error}</div>
+              {debugInfo && (
+                  <div className="mt-2 bg-red-100 p-2 rounded max-h-24 overflow-y-auto font-mono text-[10px] break-all">
+                      <div className="flex items-center gap-1 font-bold mb-1"><Terminal size={10}/> Debug Info</div>
+                      {debugInfo}
+                  </div>
+              )}
             </div>
           )}
 
@@ -191,7 +206,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                              />
                         </div>
                         <p className="text-[10px] text-yellow-700 mt-2">
-                           Enter the characters shown in the image.
+                           Enter the characters shown in the image to continue.
                         </p>
                     </div>
                 )}
