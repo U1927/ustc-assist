@@ -1,17 +1,26 @@
+
 import { ScheduleItem } from '../types';
 
-export const autoImportFromJw = async (username: string, pass: string): Promise<any> => {
+export const autoImportFromJw = async (
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+): Promise<any> => {
   try {
-    // Note: On Vercel, this requests /api/jw/login which is handled by api/jw/login.js
+    const payload: any = { username, password: pass };
+    if (captchaCode) payload.captchaCode = captchaCode;
+    if (context) payload.context = context;
+
+    // Note: On Vercel, this requests /api/jw/login
     const response = await fetch('/api/jw/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username, password: pass }),
+      body: JSON.stringify(payload),
     });
 
-    // Handle generic server errors
     if (response.status === 404) {
       throw new Error("API Endpoint Not Found. Ensure 'api/jw/login.js' is deployed.");
     }
@@ -21,7 +30,6 @@ export const autoImportFromJw = async (username: string, pass: string): Promise<
     }
 
     const text = await response.text();
-
     if (!text) {
       throw new Error(`Server returned empty response (Status: ${response.status})`);
     }
@@ -30,8 +38,12 @@ export const autoImportFromJw = async (username: string, pass: string): Promise<
     try {
       result = JSON.parse(text);
     } catch (e) {
-      console.error("[Crawler] Invalid JSON received:", text.substring(0, 100));
       throw new Error(`Server Error: Received invalid format (Status ${response.status}).`);
+    }
+
+    // Special Case: Captcha Required (Not an error, but a step)
+    if (result.requireCaptcha) {
+        return result; // Return the whole object so frontend can handle it
     }
 
     if (!response.ok || !result.success) {
