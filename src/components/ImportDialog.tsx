@@ -1,5 +1,6 @@
+
 import React, { useState } from 'react';
-import { X, FileJson, Check, AlertCircle, HelpCircle, Loader2, Globe } from 'lucide-react';
+import { X, FileJson, Check, AlertCircle, HelpCircle, Loader2, Globe, RefreshCw } from 'lucide-react';
 import { autoImportFromJw } from '../services/crawlerService';
 
 interface ImportDialogProps {
@@ -16,6 +17,12 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Captcha State
+  const [captchaRequired, setCaptchaRequired] = useState(false);
+  const [captchaImage, setCaptchaImage] = useState('');
+  const [captchaCode, setCaptchaCode] = useState('');
+  const [loginContext, setLoginContext] = useState<any>(null);
   
   const [error, setError] = useState('');
 
@@ -37,23 +44,57 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       setError("Please enter Username and Password");
       return;
     }
+    if (captchaRequired && !captchaCode) {
+        setError("Please enter the verification code");
+        return;
+    }
 
     setIsLoading(true);
     setError('');
 
     try {
-      const data = await autoImportFromJw(username, password);
-      // Convert object to string for the parser
-      const jsonStr = JSON.stringify(data);
+      // Pass captcha and context if we are in phase 2
+      const response = await autoImportFromJw(
+          username, 
+          password, 
+          captchaRequired ? captchaCode : undefined,
+          loginContext
+      );
+
+      // Check if server asks for Captcha (or asks AGAIN)
+      if (response.requireCaptcha) {
+          setCaptchaRequired(true);
+          setCaptchaImage(response.captchaImage);
+          setLoginContext(response.context);
+          setCaptchaCode(''); // Clear previous code
+          setError(response.message || "Please enter the code shown below.");
+          setIsLoading(false);
+          return;
+      }
+
+      // Success logic
+      const jsonStr = JSON.stringify(response);
       onImport(jsonStr);
-      // Clear sensitive data
+      
+      // Cleanup
       setPassword('');
       setUsername('');
+      setCaptchaRequired(false);
+      setCaptchaCode('');
+      setLoginContext(null);
+
     } catch (err: any) {
       setError(err.message || "Login failed. Please try Manual Import.");
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const resetAutoImport = () => {
+      setCaptchaRequired(false);
+      setLoginContext(null);
+      setCaptchaCode('');
+      setError('');
   };
 
   return (
@@ -86,7 +127,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
           
           {error && (
             <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-1 text-xs border border-red-100 animate-pulse">
-              <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> Error</div>
+              <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> System Message</div>
               <div>{error}</div>
             </div>
           )}
@@ -98,32 +139,62 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                    <div>
                      <p className="font-bold">Connects to USTC CAS</p>
                      <p className="opacity-80 text-xs mt-1">
-                       This uses a secure proxy to log in to <code>passport.ustc.edu.cn</code>.
-                       If this fails, please use the <strong>Manual Paste</strong> tab, as the CAS system often blocks automated logins or requires a Captcha.
+                       Secure proxy to <code>passport.ustc.edu.cn</code>. 
+                       Handles standard login and captcha verification.
                      </p>
                    </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Student ID / GID</label>
-                  <input 
-                    type="text" 
-                    value={username}
-                    onChange={e => setUsername(e.target.value)}
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="PB20xxxx"
-                  />
+                {/* Standard Credentials */}
+                <div className={captchaRequired ? 'opacity-50 pointer-events-none' : ''}>
+                    <div className="mb-3">
+                        <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Student ID</label>
+                        <input 
+                            type="text" 
+                            value={username}
+                            onChange={e => setUsername(e.target.value)}
+                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            placeholder="PB20xxxx"
+                            disabled={captchaRequired}
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Password</label>
+                        <input 
+                            type="password" 
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            disabled={captchaRequired}
+                        />
+                    </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Password</label>
-                  <input 
-                    type="password" 
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                    placeholder="USTC Passport Password"
-                  />
-                </div>
+
+                {/* CAPTCHA SECTION */}
+                {captchaRequired && (
+                    <div className="bg-yellow-50 p-4 rounded border border-yellow-200 animate-in fade-in slide-in-from-top-2">
+                        <div className="flex justify-between items-center mb-2">
+                             <label className="block text-xs font-bold text-yellow-800 uppercase">Security Check</label>
+                             <button type="button" onClick={resetAutoImport} className="text-[10px] text-gray-500 underline">Cancel</button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                             {captchaImage && (
+                                 <img src={captchaImage} alt="Captcha" className="h-10 border rounded shadow-sm" />
+                             )}
+                             <input 
+                                type="text"
+                                autoFocus
+                                value={captchaCode}
+                                onChange={e => setCaptchaCode(e.target.value)}
+                                className="flex-1 p-2 border rounded focus:ring-2 focus:ring-yellow-500 outline-none font-mono text-center tracking-widest uppercase"
+                                placeholder="CODE"
+                             />
+                        </div>
+                        <p className="text-[10px] text-yellow-700 mt-2">
+                           Enter the characters shown in the image.
+                        </p>
+                    </div>
+                )}
 
                 <div className="pt-2">
                   <button 
@@ -131,8 +202,8 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                     disabled={isLoading}
                     className="w-full bg-blue-600 text-white font-bold py-2.5 rounded hover:bg-blue-700 flex items-center justify-center gap-2 transition"
                   >
-                    {isLoading ? <Loader2 className="animate-spin" size={18}/> : <Check size={18}/>}
-                    {isLoading ? "Connecting to JW..." : "Login & Sync"}
+                    {isLoading ? <Loader2 className="animate-spin" size={18}/> : (captchaRequired ? <Check size={18}/> : <RefreshCw size={18}/>)}
+                    {isLoading ? (captchaRequired ? "Verifying..." : "Connecting...") : (captchaRequired ? "Submit Verification" : "Login & Sync")}
                   </button>
                 </div>
              </form>
