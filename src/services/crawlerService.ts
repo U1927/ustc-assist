@@ -10,6 +10,14 @@ export const autoImportFromJw = async (username: string, pass: string): Promise<
       body: JSON.stringify({ username, password: pass }),
     });
 
+    if (response.status === 405) {
+      throw new Error("Backend Service Not Reachable (405). Please ensure the node server is running ('node server.js').");
+    }
+
+    if (response.status === 404) {
+      throw new Error("API Endpoint Not Found (404). Ensure backend is running and proxy is configured.");
+    }
+
     // Fix: Read as text first to prevent "Unexpected end of JSON input" on empty/error responses
     const text = await response.text();
 
