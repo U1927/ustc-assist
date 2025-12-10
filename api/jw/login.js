@@ -50,33 +50,61 @@ export default async function handler(req, res) {
     const $ = cheerio.load(loginPage.data);
     const html = loginPage.data;
     
-    // Robust selectors
-    let lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
-    let execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
+    // --- ROBUST TOKEN EXTRACTION STRATEGY ---
+    let lt = '';
+    let execution = '';
+
+    // Strategy 1: Standard Selectors
+    lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
+    execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
+
+    // Strategy 2: Regex for reversed attributes (value before name) or messy HTML
+    // Example: <input value="LT-xxxx" name="lt">
+    if (!lt) {
+        const ltValueMatch = html.match(/value=["'](LT-[^"']+)["']/);
+        if (ltValueMatch) {
+            lt = ltValueMatch[1];
+            console.log('[API] Found LT using Regex Strategy 2 (Value Match)');
+        }
+    }
+
+    // Strategy 3: Brute Force "LT-" search in text
+    // USTC tickets usually start with "LT-". We look for it inside quotes.
+    if (!lt) {
+        const bruteMatch = html.match(/["'](LT-[a-zA-Z0-9\-\.]+)["']/);
+        if (bruteMatch) {
+            lt = bruteMatch[1];
+            console.log('[API] Found LT using Regex Strategy 3 (Brute Force)');
+        }
+    }
+
+    // Similar strategies for Execution
+    if (!execution) {
+         // Try finding name="execution" value="..."
+         const execMatch = html.match(/name=["']execution["'][^>]*value=["'](.*?)["']/);
+         if (execMatch) execution = execMatch[1];
+    }
+    if (!execution) {
+         // Try finding generic e1s1 pattern inside quotes
+         const bruteExec = html.match(/["'](e[0-9]s[0-9]+)["']/);
+         if (bruteExec) {
+             execution = bruteExec[1];
+             console.log('[API] Found execution using Brute Force');
+         }
+    }
+
     let eventId = $('input[name="_eventId"]').val() || 'submit';
 
-    // REGEX FALLBACK (If selectors fail)
-    if (!lt) {
-        // Try finding name="lt" value="..."
-        const ltMatch = html.match(/name=["']lt["']\s+value=["'](.*?)["']/);
-        if (ltMatch) lt = ltMatch[1];
-    }
-    
-    if (!execution) {
-        // Try finding name="execution" value="..."
-        const execMatch = html.match(/name=["']execution["']\s+value=["'](.*?)["']/);
-        if (execMatch) execution = execMatch[1];
-    }
-
-    // If both are missing, we likely hit a Captcha page, a WAF, or the page changed completely
+    // Validation
     if (!lt && !execution) {
       const pageTitle = $('title').text() || 'No Title';
+      // Clean up body text for log
       const bodyPreview = $('body').text().substring(0, 100).replace(/\s+/g, ' ');
       console.error(`[API] Parsing Failed. Title: ${pageTitle}`);
       
       return res.status(500).json({ 
         success: false, 
-        error: `Login Page Parsing Failed. Title: "${pageTitle}". Content: "${bodyPreview}". The CAS system may be blocking this request or has changed.` 
+        error: `登录页面解析失败。请检查是否需要验证码。\n页面标题: "${pageTitle}"` 
       });
     }
 
@@ -86,14 +114,11 @@ export default async function handler(req, res) {
     params.append('username', username);
     params.append('password', password);
     
-    // Only append LT if it exists (newer CAS might not use it)
     if (lt) params.append('lt', lt);
     if (execution) params.append('execution', execution);
     
     params.append('_eventId', eventId);
     params.append('button', '');
-    
-    // Add missing params sometimes required by newer CAS
     params.append('warn', 'true');
 
     const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
@@ -109,17 +134,19 @@ export default async function handler(req, res) {
     const newCookies = getCookies(loginResponse);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    // Check for login failure (usually returns 200 OK with error msg on page instead of 302 Redirect)
+    // Check for explicit login errors in page content
     if (loginResponse.status === 200 && loginResponse.data.includes('id="loginForm"')) {
         const $err = cheerio.load(loginResponse.data);
-        const errMsg = $err('#msg').text() || 'Invalid credentials or Captcha required.';
-        return res.status(401).json({ success: false, error: errMsg });
+        // Try to find the error message div
+        let errMsg = $err('#msg').text() || $err('.errors').text();
+        if (!errMsg && loginResponse.data.includes('验证码')) {
+            errMsg = '系统检测到异常，需要输入验证码。请使用"手动导入"功能。';
+        }
+        return res.status(401).json({ success: false, error: errMsg || '账号或密码错误 (Invalid Credentials)' });
     }
 
     if (loginResponse.status !== 302) {
-       // Sometimes a successful login might return 200 with a script redirect?
-       // But usually CAS 302s.
-       return res.status(500).json({ success: false, error: `CAS did not redirect (Status: ${loginResponse.status}). Check credentials or captcha.` });
+       return res.status(500).json({ success: false, error: `CAS 登录未重定向 (Status: ${loginResponse.status})。可能是因为需要验证码，请尝试手动导入。` });
     }
 
     const redirectUrl = loginResponse.headers['location'];
@@ -163,7 +190,7 @@ export default async function handler(req, res) {
              return res.json({ success: true, data: json });
            } catch(e) {}
        }
-       return res.status(500).json({ success: false, error: 'Could not extract Course Data API URL from JW page. You might need to log in manually.' });
+       return res.status(500).json({ success: false, error: '无法从教务页面提取数据接口。请尝试手动导入。' });
     }
 
     console.log('[API] 5. Fetching JSON from:', apiUrl);
@@ -175,6 +202,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('[API] Error:', error.message);
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({ success: false, error: `网络或解析错误: ${error.message}` });
   }
 }
