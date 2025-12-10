@@ -12,29 +12,30 @@ const getCookies = (response) => {
 // Helper: Check for Captcha in HTML and fetch it if present
 const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
   const $ = cheerio.load(html);
-  // Common selectors for CAS Captcha
+  
+  // 1. Detect Captcha Elements
   // USTC CAS usually uses id="validateImg" or src containing "validateCode"
-  const captchaImg = $('#validateImg'); 
-  const hasCaptcha = captchaImg.length > 0 || html.includes('validateCode');
+  let captchaImg = $('#validateImg'); 
+  let hasCaptcha = captchaImg.length > 0 || html.includes('validateCode') || html.includes('vcode');
+
+  let imgSrc = '';
 
   if (hasCaptcha) {
-    let imgSrc = captchaImg.attr('src');
-    if (!imgSrc && html.includes('validateCode')) {
-        // Fallback regex to find src
-        const match = html.match(/src="([^"]*validateCode[^"]*)"/);
+    imgSrc = captchaImg.attr('src');
+    
+    // Fallback: Regex to find src if cheerio failed or dynamic
+    if (!imgSrc) {
+        const match = html.match(/src=["']([^"']*validateCode[^"']*)["']/i) || html.match(/src=["']([^"']*vcode[^"']*)["']/i);
         if (match) imgSrc = match[1];
     }
 
     if (imgSrc) {
       // Resolve relative URL
       if (!imgSrc.startsWith('http')) {
-         // baseUrl is like https://passport.ustc.edu.cn/login...
-         // we need the origin https://passport.ustc.edu.cn
          const origin = new URL(baseUrl).origin;
          if (imgSrc.startsWith('/')) {
             imgSrc = origin + imgSrc;
          } else {
-             // very rough handling for relative without /
              imgSrc = origin + '/' + imgSrc;
          }
       }
@@ -107,35 +108,49 @@ export default async function handler(req, res) {
         const html = loginPage.data;
         const $ = cheerio.load(html);
 
-        // Extract Tokens
+        // 1. Extract Tokens (Standard Selectors)
         lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
         execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
-        // Fallbacks for Token Extraction
+        // 2. Fallback: Robust Regex for Tokens
         if (!lt) {
-            const ltMatch = html.match(/value=["'](LT-[^"']+)["']/) || html.match(/["'](LT-[a-zA-Z0-9\-\.]+)["']/);
+            // Match value="LT-..." or value='LT-...' or just LT-... inside input
+            const ltMatch = html.match(/value=["']?(LT-[a-zA-Z0-9\-\._]+)["']?/i); 
             if (ltMatch) lt = ltMatch[1];
         }
         if (!execution) {
-             const execMatch = html.match(/name=["']execution["'][^>]*value=["'](.*?)["']/) || html.match(/["'](e[0-9]s[0-9]+)["']/);
+             const execMatch = html.match(/name=["']execution["'][^>]*value=["']?([eE][a-zA-Z0-9]+[sS][a-zA-Z0-9]+)["']?/i) || html.match(/value=["']?([eE][a-zA-Z0-9]+[sS][a-zA-Z0-9]+)["']?/i);
              if (execMatch) execution = execMatch[1];
         }
 
-        if (!lt && !execution) {
-             return res.status(500).json({ success: false, error: 'CAS Page Parsing Failed. System might have changed.' });
-        }
-
-        // Check for Initial Captcha (Rare, but possible)
+        // 3. Early Captcha Check (Even if tokens are missing)
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
+        
         if (captchaCheck.found) {
+            console.log('[API] Captcha required during initial load.');
             return res.json({
                 success: false,
                 requireCaptcha: true,
                 captchaImage: captchaCheck.image,
-                message: "Please enter the verification code.",
-                context: { sessionCookies, lt, execution, eventId }
+                message: "Security check required. Please enter code.",
+                // Return whatever tokens we found, or empty strings.
+                // If tokens are missing, the next request might fail, but at least user sees captcha.
+                context: { sessionCookies, lt: lt || '', execution: execution || '', eventId }
             });
+        }
+
+        // 4. Critical Token Validation
+        if (!lt || !execution) {
+             const title = $('title').text();
+             const snippet = html.substring(0, 1000).replace(/</g, '&lt;'); // Escape for safety
+             console.error(`[API] Parsing Failed. Title: ${title}`);
+             
+             return res.status(500).json({ 
+                 success: false, 
+                 error: `CAS Parsing Failed. Page Title: "${title}". System might have changed.`,
+                 debugHtml: snippet
+             });
         }
     }
 
@@ -148,7 +163,7 @@ export default async function handler(req, res) {
     params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
-    params.append('button', ''); // Sometimes required
+    if (!params.has('button')) params.append('button', 'login'); // Sometimes 'login' is needed
     
     // Add Captcha if provided
     if (captchaCode) {
@@ -168,28 +183,31 @@ export default async function handler(req, res) {
     const newCookies = getCookies(loginResponse);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    // --- STEP 3: HANDLE RESPONSE (Success or Failure/Captcha) ---
+    // --- STEP 3: HANDLE RESPONSE ---
 
-    // Scenario A: Login Failed (200 OK means we are still on login page)
+    // Scenario A: Still on Login Page (Failure or Captcha)
     if (loginResponse.status === 200) {
         const html = loginResponse.data;
         const $err = cheerio.load(html);
         let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
 
-        // Check if failure is due to Captcha (or if Captcha is now required)
+        // Check for Captcha again
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
         
         if (captchaCheck.found) {
+            // Update tokens if they rotated
+            const newLt = $err('input[name="lt"]').val() || lt;
+            const newExec = $err('input[name="execution"]').val() || execution;
+
             return res.json({
                 success: false,
                 requireCaptcha: true,
                 captchaImage: captchaCheck.image,
-                message: errMsg.includes('验证码') ? errMsg : "Verification code required.",
-                // Important: Update context tokens if they changed on the failure page
+                message: errMsg.includes('验证') ? errMsg : "Verification code required.",
                 context: { 
                     sessionCookies, 
-                    lt: $err('input[name="lt"]').val() || lt, // Usually tokens rotate
-                    execution: $err('input[name="execution"]').val() || execution, 
+                    lt: newLt, 
+                    execution: newExec, 
                     eventId 
                 }
             });
@@ -222,7 +240,7 @@ export default async function handler(req, res) {
             headers: { 'Cookie': sessionCookies }
         });
 
-        // Parse IDs to find API URL
+        // Parse IDs
         const pageHtml = tablePageResponse.data;
         const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
         const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
@@ -242,7 +260,7 @@ export default async function handler(req, res) {
             return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
         }
 
-        return res.status(500).json({ success: false, error: 'Failed to extract data URL from JW page.' });
+        return res.status(500).json({ success: false, error: 'Login successful, but failed to extract schedule data from JW page.' });
     }
 
     return res.status(500).json({ success: false, error: `Unexpected Status: ${loginResponse.status}` });
