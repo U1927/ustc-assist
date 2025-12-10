@@ -12,6 +12,8 @@ export interface ScheduleItem {
   textbook?: string; // Requirement: Books to bring
 }
 
+export type Priority = 'high' | 'medium' | 'low';
+
 export interface TodoItem {
   id: string;
   content: string;
@@ -19,6 +21,7 @@ export interface TodoItem {
   isCompleted: boolean;
   isExpired: boolean;
   tags: string[];
+  priority: Priority;
 }
 
 export interface SemesterConfig {
