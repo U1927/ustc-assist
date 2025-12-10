@@ -10,7 +10,6 @@ const getCookies = (response) => {
 
 export default async function handler(req, res) {
   // 1. Set CORS Headers
-  // Vercel serverless functions require manual CORS handling if not using Next.js middleware
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
@@ -32,7 +31,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ success: false, error: 'Missing credentials' });
   }
 
-  // --- CRAWLER LOGIC (Migrated from server.js) ---
+  // --- CRAWLER LOGIC ---
 
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
   let sessionCookies = '';
@@ -40,16 +39,31 @@ export default async function handler(req, res) {
   try {
     // A. GET Login Page to fetch tokens (LT, execution)
     console.log('[API] 1. Fetching CAS login page...');
-    const loginPage = await axios.get(CAS_LOGIN_URL);
+    const loginPage = await axios.get(CAS_LOGIN_URL, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    });
     sessionCookies = getCookies(loginPage);
     
     const $ = cheerio.load(loginPage.data);
-    const lt = $('input[name="lt"]').val();
-    const execution = $('input[name="execution"]').val();
+    
+    // Robust selectors
+    // Some CAS versions use id="lt", others use name="lt", some drop it entirely
+    const lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
+    const execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
     const eventId = $('input[name="_eventId"]').val() || 'submit';
 
-    if (!lt) {
-      return res.status(500).json({ success: false, error: 'Failed to parse Login Ticket (LT). CAS might have changed.' });
+    // If both are missing, we likely hit a Captcha page, a WAF, or the page changed completely
+    if (!lt && !execution) {
+      const pageTitle = $('title').text() || 'No Title';
+      const bodyPreview = $('body').text().substring(0, 100).replace(/\s+/g, ' ');
+      console.error(`[API] Parsing Failed. Title: ${pageTitle}`);
+      
+      return res.status(500).json({ 
+        success: false, 
+        error: `Login Page Parsing Failed. Title: "${pageTitle}". Content: "${bodyPreview}". The CAS system may be blocking this request or has changed.` 
+      });
     }
 
     // B. POST Credentials
@@ -57,8 +71,11 @@ export default async function handler(req, res) {
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    params.append('lt', lt);
-    params.append('execution', execution);
+    
+    // Only append LT if it exists (newer CAS might not use it)
+    if (lt) params.append('lt', lt);
+    if (execution) params.append('execution', execution);
+    
     params.append('_eventId', eventId);
     params.append('button', '');
 
@@ -83,7 +100,9 @@ export default async function handler(req, res) {
     }
 
     if (loginResponse.status !== 302) {
-       return res.status(500).json({ success: false, error: 'CAS did not redirect. Login flow unexpected.' });
+       // Sometimes a successful login might return 200 with a script redirect?
+       // But usually CAS 302s.
+       return res.status(500).json({ success: false, error: `CAS did not redirect (Status: ${loginResponse.status}). Check credentials or captcha.` });
     }
 
     const redirectUrl = loginResponse.headers['location'];
@@ -127,7 +146,7 @@ export default async function handler(req, res) {
              return res.json({ success: true, data: json });
            } catch(e) {}
        }
-       return res.status(500).json({ success: false, error: 'Could not extract Course Data API URL from JW page.' });
+       return res.status(500).json({ success: false, error: 'Could not extract Course Data API URL from JW page. You might need to log in manually.' });
     }
 
     console.log('[API] 5. Fetching JSON from:', apiUrl);
