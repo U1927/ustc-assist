@@ -2,6 +2,7 @@ import { ScheduleItem } from '../types';
 
 export const autoImportFromJw = async (username: string, pass: string): Promise<any> => {
   try {
+    // Note: On Vercel, this requests /api/jw/login which is handled by api/jw/login.js
     const response = await fetch('/api/jw/login', {
       method: 'POST',
       headers: {
@@ -10,15 +11,15 @@ export const autoImportFromJw = async (username: string, pass: string): Promise<
       body: JSON.stringify({ username, password: pass }),
     });
 
-    if (response.status === 405) {
-      throw new Error("Backend Service Not Reachable (405). Please ensure the node server is running ('node server.js').");
-    }
-
+    // Handle generic server errors
     if (response.status === 404) {
-      throw new Error("API Endpoint Not Found (404). Ensure backend is running and proxy is configured.");
+      throw new Error("API Endpoint Not Found. Ensure 'api/jw/login.js' is deployed.");
+    }
+    
+    if (response.status === 504) {
+       throw new Error("Request Timed Out. CAS might be slow.");
     }
 
-    // Fix: Read as text first to prevent "Unexpected end of JSON input" on empty/error responses
     const text = await response.text();
 
     if (!text) {
@@ -30,8 +31,7 @@ export const autoImportFromJw = async (username: string, pass: string): Promise<
       result = JSON.parse(text);
     } catch (e) {
       console.error("[Crawler] Invalid JSON received:", text.substring(0, 100));
-      // If we get HTML (like a 404 or 500 page from a proxy), show a clear error
-      throw new Error(`Server Error: Received invalid format (Status ${response.status}). Ensure backend is running.`);
+      throw new Error(`Server Error: Received invalid format (Status ${response.status}).`);
     }
 
     if (!response.ok || !result.success) {
