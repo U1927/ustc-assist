@@ -7,6 +7,17 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Enable CORS manually to prevent 405/Cors issues if proxy fails
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -28,9 +39,8 @@ app.post('/api/jw/login', async (req, res) => {
   }
 
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
-  const JW_DATA_URL = 'https://jw.ustc.edu.cn/for-std/course-table'; // We will find the specific data API dynamically or use a known one
+  // const JW_DATA_URL = 'https://jw.ustc.edu.cn/for-std/course-table'; 
 
-  // Create a session-like behavior by passing Cookie headers manually
   let sessionCookies = '';
 
   try {
@@ -62,20 +72,16 @@ app.post('/api/jw/login', async (req, res) => {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': sessionCookies,
-        // Fake User-Agent to avoid simple bot detection
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      maxRedirects: 0, // We want to handle redirects manually to capture cookies
+      maxRedirects: 0, 
       validateStatus: (status) => status >= 200 && status < 400
     });
 
-    // Capture new cookies (CASTGC etc)
     const newCookies = getCookies(loginResponse);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    // Check for failure (if we are still on login page or didn't get redirect)
     if (loginResponse.status === 200 && loginResponse.data.includes('id="loginForm"')) {
-        // Check for error message
         const $err = cheerio.load(loginResponse.data);
         const errMsg = $err('#msg').text() || 'Invalid credentials or Captcha required.';
         return res.status(401).json({ success: false, error: errMsg });
@@ -88,7 +94,7 @@ app.post('/api/jw/login', async (req, res) => {
     const redirectUrl = loginResponse.headers['location'];
     console.log('[Proxy] 3. Following redirect to:', redirectUrl);
 
-    // 3. Follow Redirect to JW System (Exchange Ticket for Session)
+    // 3. Follow Redirect to JW System
     const jwLoginResponse = await axios.get(redirectUrl, {
       headers: { 
          'Cookie': sessionCookies,
@@ -102,24 +108,14 @@ app.post('/api/jw/login', async (req, res) => {
     if (jwCookies) sessionCookies += '; ' + jwCookies;
 
     // 4. Fetch the actual Schedule Data
-    // We need to find the student specific ID or just query the default "get-data" endpoint if possible.
-    // Usually JW has dynamic IDs in the URL. We might need to fetch the main page first.
-    
     console.log('[Proxy] 4. Accessing Course Table Page...');
     const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
         headers: { 'Cookie': sessionCookies }
     });
     
-    // We need to extract the specific API ID from the page source or use a generic one.
-    // Typically, there is a script accessing `/for-std/course-table/get-data?bizTypeId=2&studentId=...`
-    // Let's regex for the studentId.
-    const $table = cheerio.load(tablePageResponse.data);
-    
-    // Attempt to find student ID from scripts
-    // Pattern often looks like: "studentId": 12345
     const html = tablePageResponse.data;
     const studentIdMatch = html.match(/studentId[:\s"']+(\d+)/);
-    const bizTypeIdMatch = html.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2']; // Default to 2
+    const bizTypeIdMatch = html.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
     
     let apiUrl = '';
     if (studentIdMatch) {
@@ -127,9 +123,6 @@ app.post('/api/jw/login', async (req, res) => {
        const bizId = bizTypeIdMatch[1];
        apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
     } else {
-       // Fallback: Some versions of JW map /get-data directly if session is valid? Not always.
-       // Try parsing the "lessons" JSON directly embedded in the HTML if available.
-       // Often embedded in `var activities = [...]`
        const activityMatch = html.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
        if (activityMatch) {
            console.log('[Proxy] Found embedded data in HTML.');
