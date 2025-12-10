@@ -4,11 +4,11 @@ import Login from './components/Login';
 import CalendarView from './components/CalendarView';
 import Sidebar from './components/Sidebar';
 import SettingsDialog from './components/SettingsDialog';
-import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings } from './types';
+import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings, Priority } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import { generateStudyPlan } from './services/aiService';
-import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2 } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2, X, Clock, MapPin, BookOpen, AlignLeft } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
@@ -23,6 +23,7 @@ const App: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>('single');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<ScheduleItem | null>(null);
   
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [isLoadingAI, setIsLoadingAI] = useState(false);
@@ -44,7 +45,7 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V10.1 (USTC Course System)");
+    console.log("App Version: Cloud V10.2 (Detail View & 24h Timeline)");
 
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -214,7 +215,6 @@ const App: React.FC = () => {
       });
     }
 
-    // Basic Conflict Check (Just checking first item for speed/UX)
     if (newItems.length > 0 && Utils.checkForConflicts(newItems[0], events)) {
       if(!confirm(`Potential conflict detected in Week ${weekStart}. Add ${newItems.length} course sessions anyway?`)) return;
     }
@@ -227,6 +227,7 @@ const App: React.FC = () => {
   const handleDeleteEvent = (id: string) => {
     if (confirm('Delete this event?')) {
       setEvents(events.filter(e => e.id !== id));
+      setSelectedEvent(null);
     }
   };
 
@@ -242,14 +243,15 @@ const App: React.FC = () => {
     setIsLoadingAI(false);
   };
 
-  const handleAddTodo = (content: string, deadline?: string) => {
+  const handleAddTodo = (content: string, deadline?: string, priority: Priority = 'medium') => {
     const todo: TodoItem = {
       id: crypto.randomUUID(),
       content,
       deadline,
       isCompleted: false,
       isExpired: false,
-      tags: []
+      tags: [],
+      priority
     };
     setTodos([...todos, todo]);
   };
@@ -318,7 +320,14 @@ const App: React.FC = () => {
 
         <main className="flex-1 overflow-hidden p-4 flex flex-col">
           <div className="flex-1 overflow-hidden">
-             <CalendarView mode={viewMode} currentDate={currentDate} events={events} onDeleteEvent={handleDeleteEvent} />
+             <CalendarView 
+               mode={viewMode} 
+               currentDate={currentDate} 
+               events={events} 
+               todos={todos}
+               onDeleteEvent={handleDeleteEvent} 
+               onSelectEvent={setSelectedEvent}
+             />
           </div>
           <div className="h-6 mt-1 flex items-center justify-end px-2 bg-gray-50 border-t border-gray-200 rounded-b-lg">
              {renderSyncStatus()}
@@ -346,11 +355,68 @@ const App: React.FC = () => {
         onChangePassword={handleChangePassword}
       />
 
-      {/* NEW ADD MODAL */}
+      {/* EVENT DETAIL MODAL */}
+      {selectedEvent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+           <div className="bg-white rounded-xl shadow-2xl w-[400px] max-w-full animate-in zoom-in-95 duration-200 overflow-hidden">
+             <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-start">
+                <div>
+                   <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{selectedEvent.type}</span>
+                   <h2 className="text-xl font-bold text-gray-900 mt-1">{selectedEvent.title}</h2>
+                </div>
+                <button onClick={() => setSelectedEvent(null)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+             </div>
+             
+             <div className="p-6 space-y-4">
+               <div className="flex items-center gap-3 text-gray-700">
+                  <Clock className="text-gray-400" size={18} />
+                  <div>
+                    <div className="text-sm font-semibold">{format(new Date(selectedEvent.startTime), 'EEEE, MMMM d')}</div>
+                    <div className="text-xs text-gray-500">
+                      {format(new Date(selectedEvent.startTime), 'HH:mm')} - {format(new Date(selectedEvent.endTime), 'HH:mm')}
+                    </div>
+                  </div>
+               </div>
+               
+               <div className="flex items-center gap-3 text-gray-700">
+                  <MapPin className="text-gray-400" size={18} />
+                  <div className="text-sm font-medium">{selectedEvent.location}</div>
+               </div>
+
+               {selectedEvent.textbook && (
+                 <div className="flex items-center gap-3 text-gray-700">
+                    <BookOpen className="text-gray-400" size={18} />
+                    <div className="text-sm">{selectedEvent.textbook}</div>
+                 </div>
+               )}
+
+               {selectedEvent.description && (
+                 <div className="flex items-start gap-3 text-gray-700 pt-2 border-t">
+                    <AlignLeft className="text-gray-400 mt-1" size={18} />
+                    <div className="text-sm text-gray-600 leading-relaxed">{selectedEvent.description}</div>
+                 </div>
+               )}
+             </div>
+
+             <div className="bg-gray-50 px-6 py-3 border-t flex justify-between items-center">
+                <button 
+                  onClick={() => handleDeleteEvent(selectedEvent.id)}
+                  className="text-red-600 text-sm font-medium hover:underline flex items-center gap-1"
+                >
+                  <Trash2 size={14} /> Delete Event
+                </button>
+                <button onClick={() => setSelectedEvent(null)} className="bg-white border border-gray-300 text-gray-700 px-4 py-1.5 rounded text-sm hover:bg-gray-100">
+                  Close
+                </button>
+             </div>
+           </div>
+        </div>
+      )}
+
+      {/* ADD MODAL */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full m-4 animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header & Tabs */}
             <div className="flex border-b border-gray-200">
               <button 
                 onClick={() => setAddMode('single')} 
@@ -402,7 +468,6 @@ const App: React.FC = () => {
                      <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} />
                   </div>
                   
-                  {/* Weeks */}
                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
                      <label className="text-xs font-bold text-blue-700 mb-2 block">Teaching Weeks (Semester: {user?.settings.semester?.name || 'Default'})</label>
                      <div className="flex items-center gap-2">
@@ -413,7 +478,6 @@ const App: React.FC = () => {
                      </div>
                   </div>
 
-                  {/* Schedule List */}
                   <div>
                     <div className="flex justify-between items-center mb-2">
                        <label className="text-xs font-bold text-gray-600 uppercase">Class Sessions</label>
