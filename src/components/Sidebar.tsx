@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { TodoItem, Priority } from '../types';
-import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, ArrowUp, ArrowRight, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, Check, AlertTriangle, Sparkles, Settings, ArrowUp, ArrowRight, ArrowDown, FileJson } from 'lucide-react';
 import { format, isPast, compareAsc } from 'date-fns';
 
 interface SidebarProps {
@@ -11,6 +11,7 @@ interface SidebarProps {
   onDeleteTodo: (id: string) => void;
   onGeneratePlan: () => void;
   onOpenSettings: () => void;
+  onOpenImport: () => void; // New prop
   conflicts: string[];
   isLoadingAI: boolean;
 }
@@ -22,6 +23,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteTodo, 
   onGeneratePlan,
   onOpenSettings,
+  onOpenImport,
   conflicts,
   isLoadingAI
 }) => {
@@ -42,16 +44,13 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const sortedTodos = useMemo(() => {
     return [...todos].sort((a, b) => {
-      // 1. Completion status (Active first)
       if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
       
-      // 2. Priority (High > Medium > Low)
       const pMap = { high: 3, medium: 2, low: 1 };
       const pA = pMap[a.priority || 'medium'];
       const pB = pMap[b.priority || 'medium'];
       if (pA !== pB) return pB - pA;
 
-      // 3. Deadline (Earliest first, No deadline last)
       if (a.deadline && b.deadline) {
         return compareAsc(new Date(a.deadline), new Date(b.deadline));
       }
@@ -171,6 +170,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <Check size={16} /> No schedule conflicts
               </div>
             )}
+            
+            {/* Import Section */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Sync Data</h3>
+              <button 
+                onClick={onOpenImport}
+                className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2 px-3 rounded text-sm transition"
+              >
+                <FileJson size={16} /> Import JW Schedule
+              </button>
+              <p className="text-[10px] text-gray-400 mt-1">
+                 Parse real data from JW system (Copy & Paste required).
+              </p>
+            </div>
 
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Smart Assistant</h3>
