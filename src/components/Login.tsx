@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { UserProfile } from '../types';
 import * as Storage from '../services/storageService';
 import { BookOpen, LogIn, UserPlus, Loader2 } from 'lucide-react';
+import { getSemesterDefaultStartDate } from '../services/utils';
 
 interface LoginProps {
   onLogin: (user: UserProfile) => void;
@@ -39,11 +40,21 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         // Login
         const res = await Storage.loginUser(studentId, password);
         if (res.success) {
+           const semesterStart = getSemesterDefaultStartDate();
+           
            const userProfile: UserProfile = {
              studentId: studentId,
              name: `Student ${studentId}`,
              isLoggedIn: true,
-             settings: { earlyEightReminder: true, reminderMinutesBefore: 15 }
+             settings: { 
+               earlyEightReminder: true, 
+               reminderMinutesBefore: 15,
+               semester: {
+                 name: 'Current Semester',
+                 startDate: semesterStart,
+                 totalWeeks: 18
+               }
+             }
            };
            onLogin(userProfile);
         } else {
