@@ -4,9 +4,11 @@ import Login from './components/Login';
 import CalendarView from './components/CalendarView';
 import Sidebar from './components/Sidebar';
 import SettingsDialog from './components/SettingsDialog';
+import ImportDialog from './components/ImportDialog';
 import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings, Priority } from './types';
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
+import * as UstcParser from './services/ustcParser';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2, X, Clock, MapPin, BookOpen, AlignLeft } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
@@ -23,6 +25,7 @@ const App: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>('single');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<ScheduleItem | null>(null);
   
   const [conflicts, setConflicts] = useState<string[]>([]);
@@ -45,7 +48,7 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    console.log("App Version: Cloud V10.2 (Detail View & 24h Timeline)");
+    console.log("App Version: Cloud V10.3 (Real Import)");
 
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
@@ -124,6 +127,37 @@ const App: React.FC = () => {
   const handleChangePassword = async (oldPass: string, newPass: string) => {
     if (!user) return { success: false, error: "Not logged in" };
     return await Storage.changePassword(user.studentId, oldPass, newPass);
+  };
+
+  const handleImportJson = (jsonStr: string) => {
+    if (!user?.settings.semester?.startDate) {
+      alert("Please check your semester start date in settings before importing.");
+      return;
+    }
+
+    try {
+      const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
+      if (newItems.length === 0) {
+        alert("No valid courses found in JSON. Please check the content.");
+        return;
+      }
+      
+      // Filter out existing courses to avoid duplicates (naive check by title/start time)
+      const existingSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
+      const uniqueItems = newItems.filter(item => !existingSignatures.has(`${item.title}-${item.startTime}`));
+      
+      if (uniqueItems.length === 0) {
+        alert("All found courses already exist in calendar.");
+        setShowImportModal(false);
+        return;
+      }
+
+      setEvents(prev => [...prev, ...uniqueItems]);
+      setShowImportModal(false);
+      alert(`Successfully imported ${uniqueItems.length} course sessions!`);
+    } catch (e: any) {
+      alert(`Import Failed: ${e.message}`);
+    }
   };
 
   const handleLogin = (loggedInUser: UserProfile) => {
@@ -342,6 +376,7 @@ const App: React.FC = () => {
         onDeleteTodo={handleDeleteTodo}
         onGeneratePlan={handleGeneratePlan}
         onOpenSettings={() => setShowSettingsModal(true)}
+        onOpenImport={() => setShowImportModal(true)}
         conflicts={conflicts}
         isLoadingAI={isLoadingAI}
       />
@@ -353,6 +388,12 @@ const App: React.FC = () => {
         onSave={handleUpdateSettings} 
         onForceSync={handleForceSync}
         onChangePassword={handleChangePassword}
+      />
+
+      <ImportDialog
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        onImport={handleImportJson}
       />
 
       {/* EVENT DETAIL MODAL */}
