@@ -97,6 +97,18 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
                  // Matches https://jw.ustc.edu.cn/ucas-sso/login or similar service URLs
                  const serviceMatch = html.match(/['"](https?:\/\/[^'"]+(?:login|service|sso)[^'"]*)['"]/i);
                  if (serviceMatch) redirectUrl = serviceMatch[1];
+
+                 // Desperate Fallback: Find ANY http link inside a script tag
+                 if (!redirectUrl) {
+                     const anyLinkMatch = html.match(/<script[^>]*>.*?['"](https?:\/\/[^'"]+)['"].*?<\/script>/s);
+                     if (anyLinkMatch) {
+                         // Filter out common libs
+                         const candidate = anyLinkMatch[1];
+                         if (!candidate.includes('jquery') && !candidate.includes('vue') && !candidate.includes('react')) {
+                             redirectUrl = candidate;
+                         }
+                     }
+                 }
              }
         }
 
