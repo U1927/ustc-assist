@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { X, FileJson, Check, Terminal, ExternalLink, Copy, PlayCircle, AlertCircle, Loader2, RefreshCw, Shield, Lock, User } from 'lucide-react';
+import { X, FileJson, Check, Terminal, ExternalLink, Copy, PlayCircle, AlertCircle, Loader2, RefreshCw, Shield, Lock, User, Eye, EyeOff } from 'lucide-react';
 import * as Crawler from '../services/crawlerService';
 
 interface ImportDialogProps {
@@ -16,6 +15,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   // Auto Import State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [captchaImg, setCaptchaImg] = useState('');
@@ -266,13 +266,21 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                            <div className="relative">
                               <Lock className="absolute left-3 top-2.5 text-gray-400" size={16} />
                               <input 
-                                 type="password" 
-                                 className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                 type={showPassword ? "text" : "password"}
+                                 className="w-full pl-10 pr-10 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                                  placeholder="Password"
                                  value={password}
                                  onChange={e => setPassword(e.target.value)}
                                  disabled={isLoading}
                               />
+                              <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 focus:outline-none"
+                                tabIndex={-1}
+                              >
+                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
                            </div>
                        )}
                     </div>
