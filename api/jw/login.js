@@ -101,15 +101,27 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
                  const scripts = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
                  if (scripts) {
                      for (const script of scripts) {
-                         const urlCandidate = script.match(/['"]((?:https?:\/\/|\/)[a-zA-Z0-9\-\._\/]+\?[^'"]*)['"]/);
-                         if (urlCandidate) {
-                             const candidate = urlCandidate[1];
-                             // Filter out common libraries to reduce false positives
-                             if (!candidate.includes('jquery') && !candidate.includes('vue') && !candidate.includes('.js') && !candidate.includes('.css')) {
-                                 match = urlCandidate;
-                                 break;
+                         // Find all strings that look like URLs
+                         const possibleUrls = script.match(/['"]((?:https?:\/\/|\/)[^'"]+)['"]/g);
+                         if (possibleUrls) {
+                             for (const rawMatch of possibleUrls) {
+                                 const url = rawMatch.slice(1, -1); // remove quotes
+                                 // Simple heuristic to identify login redirect URLs vs assets
+                                 if (
+                                     (url.includes('login') || url.includes('service') || url.includes('sso') || url.includes('ucas')) && 
+                                     !url.includes('.css') && 
+                                     !url.includes('.png') && 
+                                     !url.includes('.jpg') && 
+                                     !url.includes('.gif') &&
+                                     !url.includes('jquery') &&
+                                     !url.includes('vue')
+                                 ) {
+                                     match = [null, url]; // Mimic regex match structure
+                                     break;
+                                 }
                              }
                          }
+                         if (match) break;
                      }
                  }
              }
