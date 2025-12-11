@@ -1,3 +1,4 @@
+
 const express = require('express');
 const path = require('path');
 const axios = require('axios');
@@ -30,43 +31,142 @@ const getCookies = (response) => {
   return setCookie.map(c => c.split(';')[0]).join('; ');
 };
 
+const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
+  const $ = cheerio.load(html);
+  let captchaImg = $('#validateImg'); 
+  let hasCaptcha = captchaImg.length > 0 || html.includes('validateCode') || html.includes('vcode');
+
+  let imgSrc = '';
+
+  if (hasCaptcha) {
+    imgSrc = captchaImg.attr('src');
+    if (!imgSrc) {
+        const match = html.match(/src=["']([^"']*validateCode[^"']*)["']/i) || html.match(/src=["']([^"']*vcode[^"']*)["']/i);
+        if (match) imgSrc = match[1];
+    }
+
+    if (imgSrc) {
+      if (!imgSrc.startsWith('http')) {
+         const origin = new URL(baseUrl).origin;
+         if (imgSrc.startsWith('/')) {
+            imgSrc = origin + imgSrc;
+         } else {
+             imgSrc = origin + '/' + imgSrc;
+         }
+      }
+
+      try {
+        const imgRes = await axios.get(imgSrc, {
+            responseType: 'arraybuffer',
+            headers: { 
+                'Cookie': sessionCookies,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');
+        return {
+            found: true,
+            image: `data:image/jpeg;base64,${base64}`
+        };
+      } catch (e) {
+        console.error("[Proxy] Failed to fetch captcha image:", e.message);
+      }
+    }
+  }
+  return { found: false };
+};
+
 // Real login implementation
 app.post('/api/jw/login', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, captchaCode, context } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ success: false, error: 'Missing credentials' });
   }
 
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
-  // const JW_DATA_URL = 'https://jw.ustc.edu.cn/for-std/course-table'; 
-
+  
   let sessionCookies = '';
+  let lt = '';
+  let execution = '';
+  let eventId = 'submit';
 
   try {
-    // 1. GET Login Page to fetch tokens (LT, execution)
-    console.log('[Proxy] 1. Fetching CAS login page...');
-    const loginPage = await axios.get(CAS_LOGIN_URL);
-    sessionCookies = getCookies(loginPage);
-    
-    const $ = cheerio.load(loginPage.data);
-    const lt = $('input[name="lt"]').val();
-    const execution = $('input[name="execution"]').val();
-    const eventId = $('input[name="_eventId"]').val() || 'submit';
+    if (context && context.sessionCookies && context.execution) {
+        console.log('[Proxy] Resuming session with provided context.');
+        sessionCookies = context.sessionCookies;
+        lt = context.lt || '';
+        execution = context.execution;
+        eventId = context.eventId || 'submit';
+    } else {
+        console.log('[Proxy] 1. Fetching CAS login page...');
+        const loginPage = await axios.get(CAS_LOGIN_URL, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        sessionCookies = getCookies(loginPage);
+        const html = loginPage.data;
+        const $ = cheerio.load(html);
 
-    if (!lt) {
-      return res.status(500).json({ success: false, error: 'Failed to parse Login Ticket (LT). CAS might have changed.' });
+        lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
+        execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
+        eventId = $('input[name="_eventId"]').val() || 'submit';
+
+        // 2. Fallback: Robust Greedy Regex for Tokens
+        if (!lt) {
+            const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
+            if (ltMatch) lt = ltMatch[1];
+        }
+
+        if (!execution) {
+            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']|value=["']([^"']+)["'][^>]*name=["']execution["']/i;
+            const inputMatch = html.match(inputRegex);
+            if (inputMatch) execution = inputMatch[1] || inputMatch[2];
+        }
+
+        if (!execution) {
+             const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
+             if (execMatch) execution = execMatch[1];
+        }
+
+        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
+        
+        if (captchaCheck.found) {
+            console.log('[Proxy] Captcha required during initial load.');
+            return res.json({
+                success: false,
+                requireCaptcha: true,
+                captchaImage: captchaCheck.image,
+                message: "Security check required. Please enter code.",
+                context: { sessionCookies, lt: lt || '', execution: execution || '', eventId }
+            });
+        }
+
+        if (!execution) {
+             const title = $('title').text();
+             const snippet = html.substring(0, 800).replace(/</g, '&lt;');
+             console.error(`[Proxy] Parsing Failed. Title: ${title}`);
+             return res.status(500).json({ 
+                 success: false, 
+                 error: `CAS Page Parsing Failed. System might have changed.`,
+                 debugHtml: `Title: ${title}\n\nSnippet:\n${snippet}`
+             });
+        }
     }
 
-    // 2. POST Credentials
     console.log('[Proxy] 2. Submitting credentials...');
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    params.append('lt', lt);
+    if (lt) params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
-    params.append('button', '');
+    if (!params.has('button')) params.append('button', 'login'); 
+    
+    if (captchaCode) {
+        params.append('vcode', captchaCode);
+    }
 
     const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
       headers: {
@@ -81,69 +181,85 @@ app.post('/api/jw/login', async (req, res) => {
     const newCookies = getCookies(loginResponse);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    if (loginResponse.status === 200 && loginResponse.data.includes('id="loginForm"')) {
-        const $err = cheerio.load(loginResponse.data);
-        const errMsg = $err('#msg').text() || 'Invalid credentials or Captcha required.';
+    if (loginResponse.status === 200) {
+        const html = loginResponse.data;
+        const $err = cheerio.load(html);
+        let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
+
+        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
+        
+        if (captchaCheck.found) {
+            const newLt = $err('input[name="lt"]').val() || lt;
+            const newExec = $err('input[name="execution"]').val() || execution;
+            let finalExec = newExec;
+            if (!finalExec || finalExec === execution) {
+                 const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
+                 if (execMatch) finalExec = execMatch[1];
+            }
+
+            return res.json({
+                success: false,
+                requireCaptcha: true,
+                captchaImage: captchaCheck.image,
+                message: errMsg.includes('验证') ? errMsg : "Verification code required.",
+                context: { 
+                    sessionCookies, 
+                    lt: newLt, 
+                    execution: finalExec || execution, 
+                    eventId 
+                }
+            });
+        }
         return res.status(401).json({ success: false, error: errMsg });
     }
 
-    if (loginResponse.status !== 302) {
-       return res.status(500).json({ success: false, error: 'CAS did not redirect. Login flow unexpected.' });
+    if (loginResponse.status === 302) {
+        const redirectUrl = loginResponse.headers['location'];
+        console.log('[Proxy] 3. Login Successful. Redirecting to:', redirectUrl);
+
+        const jwLoginResponse = await axios.get(redirectUrl, {
+            headers: { 
+                'Cookie': sessionCookies,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            maxRedirects: 0,
+            validateStatus: (status) => status >= 200 && status < 400
+        });
+        
+        const jwCookies = getCookies(jwLoginResponse);
+        if (jwCookies) sessionCookies += '; ' + jwCookies;
+
+        console.log('[Proxy] 4. Fetching Course Data...');
+        const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
+            headers: { 'Cookie': sessionCookies }
+        });
+
+        const pageHtml = tablePageResponse.data;
+        const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
+        const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
+
+        if (studentIdMatch) {
+            const stdId = studentIdMatch[1];
+            const bizId = bizTypeIdMatch[1];
+            const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
+            
+            const dataResponse = await axios.get(apiUrl, { headers: { 'Cookie': sessionCookies } });
+            return res.json({ success: true, data: dataResponse.data });
+        } 
+        
+        const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
+        if (activityMatch) {
+            return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
+        }
+
+        return res.status(500).json({ success: false, error: 'Login successful, but failed to extract schedule data from JW page.' });
     }
 
-    const redirectUrl = loginResponse.headers['location'];
-    console.log('[Proxy] 3. Following redirect to:', redirectUrl);
-
-    // 3. Follow Redirect to JW System
-    const jwLoginResponse = await axios.get(redirectUrl, {
-      headers: { 
-         'Cookie': sessionCookies,
-         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      maxRedirects: 0,
-      validateStatus: (status) => status >= 200 && status < 400
-    });
-    
-    const jwCookies = getCookies(jwLoginResponse);
-    if (jwCookies) sessionCookies += '; ' + jwCookies;
-
-    // 4. Fetch the actual Schedule Data
-    console.log('[Proxy] 4. Accessing Course Table Page...');
-    const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
-        headers: { 'Cookie': sessionCookies }
-    });
-    
-    const html = tablePageResponse.data;
-    const studentIdMatch = html.match(/studentId[:\s"']+(\d+)/);
-    const bizTypeIdMatch = html.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
-    
-    let apiUrl = '';
-    if (studentIdMatch) {
-       const stdId = studentIdMatch[1];
-       const bizId = bizTypeIdMatch[1];
-       apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
-    } else {
-       const activityMatch = html.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
-       if (activityMatch) {
-           console.log('[Proxy] Found embedded data in HTML.');
-           try {
-             const json = JSON.parse(activityMatch[1]);
-             return res.json({ success: true, data: json });
-           } catch(e) {}
-       }
-       return res.status(500).json({ success: false, error: 'Could not extract Course Data API URL from JW page.' });
-    }
-
-    console.log('[Proxy] 5. Fetching JSON from:', apiUrl);
-    const dataResponse = await axios.get(apiUrl, {
-        headers: { 'Cookie': sessionCookies }
-    });
-
-    return res.json({ success: true, data: dataResponse.data });
+    return res.status(500).json({ success: false, error: `Unexpected Status: ${loginResponse.status}` });
 
   } catch (error) {
     console.error('[Proxy] Error:', error.message);
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({ success: false, error: `System Error: ${error.message}` });
   }
 });
 
