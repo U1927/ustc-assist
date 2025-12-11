@@ -84,7 +84,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
     let currentUrl = initialUrl;
     let sessionCookies = cookies;
     let redirectCount = 0;
-    const MAX_REDIRECTS = 10; 
+    const MAX_REDIRECTS = 12; 
 
     while (redirectCount < MAX_REDIRECTS) {
         let redirectUrl = null;
@@ -108,92 +108,101 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
         // 2. Standard JS assignments
         if (!redirectUrl) {
-            // Explicit location.href with loose matching for the SSO page
-            // This captures: window.location.href = "login?service=..."
+            // Explicit location.href with loose matching
+            // Captures: window.location.href = "..." OR location.href="..."
             const ssoRedirectMatch = html.match(/(?:location\.href|location\.replace|location\.assign)\s*[=(]\s*['"`]([^'"`]+)['"`]/i);
-
             const jsAssignment = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
-            const jsAssignmentTemplate = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*`([^`]+)`/); // ES6 Backticks
+            const jsAssignmentTemplate = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*`([^`]+)`/); 
             const jsCall = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
-            const jsCallTemplate = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*`([^`]+)`\s*\)/);
             
             if (ssoRedirectMatch) redirectUrl = ssoRedirectMatch[1];
             else if (jsAssignment) redirectUrl = jsAssignment[1];
             else if (jsAssignmentTemplate) redirectUrl = jsAssignmentTemplate[1];
             else if (jsCall) redirectUrl = jsCall[1];
-            else if (jsCallTemplate) redirectUrl = jsCallTemplate[1];
         }
 
         // 3. Nuclear Option for SSO Pages (Aggressive String Search)
-        // If we are on an SSO page but regex failed, scan for ANY string that looks like a URL.
         if (!redirectUrl && isSsoPage) {
              console.log(`[API] SSO/Loading Page detected (${redirectCount}). Engaging Nuclear URL Extraction.`);
              
-             // Decode entities FIRST to handle cases like href=&quot;...&quot;
+             // Decode entities FIRST to catch encoded URLs like https:&#x2F;&#x2F;
              const decodedHtml = decodeEntities(html);
 
-             // Strategy A: Find ALL quoted strings (single, double, or backticks)
+             // Strategy A: Find ALL quoted strings
              const urlPattern = /(['"`])([^\1]+?)\1/g;
              const candidates = [];
              let match;
 
              while ((match = urlPattern.exec(decodedHtml)) !== null) {
                  const val = match[2];
-                 // Filter: must look somewhat like a URL (contains / or ? or starts with http or is 'login')
+                 // Basic validity check
                  if (val.length > 2 && (val.includes('/') || val.includes('?') || val.startsWith('http') || val === 'login')) {
                     if (isValidCandidate(val)) candidates.push(val);
                  }
              }
 
-             // Strategy B: Find raw unquoted http/https strings
-             const rawHttpPattern = /(https?:\/\/[a-zA-Z0-9\-\._~:\/?#\[\]@!$&'()*+,;=]+)/g;
+             // Strategy B: Raw Strings (starting with http or /)
+             const rawHttpPattern = /((?:https?:\/|\/)[a-zA-Z0-9\-\._~:\/?#\[\]@!$&'()*+,;=]+)/g;
              while ((match = rawHttpPattern.exec(decodedHtml)) !== null) {
                  const url = match[1];
-                 const cleanUrl = url.split(/["';\s]/)[0]; 
+                 const cleanUrl = url.split(/["';\s<]/)[0]; 
                  if (isValidCandidate(cleanUrl)) candidates.push(cleanUrl);
              }
 
-             // Selection Logic
-             // Priority 1: Ticket is KING. If we see a ticket, that's the one.
+             // Selection Priority
+             // 1. "ticket=" is the gold standard for CAS redirects
              const ticketUrl = candidates.find(u => u.includes('ticket='));
              if (ticketUrl) {
                  redirectUrl = ticketUrl;
              } else {
-                 // Priority 2: URLs containing keywords
-                 const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso') || u.includes('auth'));
-                 
+                 // 2. Keywords
+                 const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport'));
                  if (best) {
                      redirectUrl = best;
                  } else if (candidates.length > 0) {
-                     // Priority 3: First viable candidate
-                     const viable = candidates.find(u => u.length > 3);
+                     // 3. Prefer longer URLs (likely absolute) over very short ones
+                     const viable = candidates.sort((a,b) => b.length - a.length)[0]; 
                      if (viable) redirectUrl = viable;
                  }
              }
         }
 
+        // 4. RETRY STRATEGY: If it's an SSO page but we found NO URL, refresh the current page.
+        // This handles cases where the server sets a cookie on the intermediate page and expects a reload.
+        if (!redirectUrl && isSsoPage) {
+            console.log('[API] SSO Page stuck. Attempting to REFRESH current page.');
+            redirectUrl = currentUrl; 
+        }
+
         if (!redirectUrl) break; // No redirect found
 
-        // Decode HTML entities (again just in case we didn't use the decodedHtml path)
         redirectUrl = decodeEntities(redirectUrl);
 
         // Resolve Relative URL
         if (!redirectUrl.startsWith('http')) {
             const origin = new URL(currentUrl).origin;
             if (redirectUrl.startsWith('/')) {
-                // Absolute path relative to domain
                 redirectUrl = origin + redirectUrl;
             } else {
-                // Relative path
                 const path = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
                 redirectUrl = path + redirectUrl;
             }
         }
 
-        // Prevent infinite loops if redirecting to self
-        if (redirectUrl === currentUrl) {
+        // Prevent infinite loops (Same URL) UNLESS it was our deliberate retry logic
+        if (redirectUrl === currentUrl && !isSsoPage) {
              console.log('[API] Redirect loop detected (Self). Stopping.');
              break;
+        }
+
+        // Limit self-retries to avoid infinite SSO loops
+        if (redirectUrl === currentUrl && isSsoPage) {
+            // Rudimentary check to ensure we don't loop forever on the same SSO page
+            // We use the redirectCount as a safeguard
+            if (redirectCount > 8) {
+                console.log('[API] Too many SSO refreshes. Aborting.');
+                break;
+            }
         }
 
         try {
@@ -201,7 +210,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
             const res = await axios.get(redirectUrl, { 
                 headers: { ...headers, 'Cookie': sessionCookies },
                 validateStatus: status => status < 400,
-                responseType: 'text' // CRITICAL: Prevent axios from parsing JSON, keep it string
+                responseType: 'text'
             });
             
             const newCookies = getCookies(res);
@@ -298,35 +307,20 @@ export default async function handler(req, res) {
 
         const $ = cheerio.load(html);
 
-        // 1. Extract Tokens (Standard Selectors)
+        // 1. Extract Tokens
         lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
         execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
-        // 2. Fallback: Robust Greedy Regex
+        // 2. Fallback Regex
         if (!lt) {
-            const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
-                                 html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
-            if (ltInputMatch) {
-                lt = ltInputMatch[1] || ltInputMatch[2];
-            } else {
-                const ltFormatMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
-                if (ltFormatMatch) lt = ltFormatMatch[1];
-            }
+            const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
+            if (ltMatch) lt = ltMatch[1];
         }
-
         if (!execution) {
-            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
-            const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
-            const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
+            const inputMatch = html.match(/<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i);
             if (inputMatch) execution = inputMatch[1];
         }
-
-        if (!execution) {
-             const scriptMatch = html.match(/["']?execution["']?\s*[:=]\s*["']([^"']+)["']/i);
-             if (scriptMatch) execution = scriptMatch[1];
-        }
-
         if (!execution) {
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
@@ -334,14 +328,12 @@ export default async function handler(req, res) {
         
         // 3. Early Captcha Check
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, currentUrl);
-        
         if (captchaCheck.found) {
-            console.log('[API] Captcha required during initial load.');
             return res.json({
                 success: false,
                 requireCaptcha: true,
                 captchaImage: captchaCheck.image,
-                message: "Security check required. Please enter code.",
+                message: "Security check required.",
                 context: { sessionCookies, lt: lt || '', execution: execution || '', eventId }
             });
         }
@@ -349,16 +341,12 @@ export default async function handler(req, res) {
         // 4. Critical Token Validation
         if (!execution) {
              const title = $('title').text() || "No Title Found";
-             const isSsoPage = html.includes('id="sso_redirect"') || html.includes('loading');
-             const errorType = isSsoPage ? "Stuck on SSO Loading Page" : "Parsing Failed";
-             const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid HTML Content";
-             
-             console.error(`[API] ${errorType}. Title: ${title}`);
+             const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid Content";
              
              return res.status(500).json({ 
                  success: false, 
                  error: `CAS Page Parsing Failed. System returned "${title}".`,
-                 debugHtml: `Page Title: ${title}\n\nHTML Snippet (Top 2k chars):\n${snippet}`
+                 debugHtml: `Page Title: ${title}\n\nSnippet:\n${snippet}`
              });
         }
     }
@@ -372,12 +360,8 @@ export default async function handler(req, res) {
     if (lt) params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
-    
     if (!params.has('button')) params.append('button', 'login'); 
-    
-    if (captchaCode) {
-        params.append('vcode', captchaCode);
-    }
+    if (captchaCode) params.append('vcode', captchaCode);
 
     const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
       headers: {
@@ -399,25 +383,22 @@ export default async function handler(req, res) {
 
     if (loginResponse.status === 200) {
         let html = loginResponse.data;
-        
-        // Check if it's actually a redirect disguised as 200
         const redirectCheck = await followPageRedirects(html, CAS_LOGIN_URL, sessionCookies, BROWSER_HEADERS);
         
         if (redirectCheck.currentUrl !== CAS_LOGIN_URL) {
-            console.log('[API] Login returned 200 but contained redirect (Success). Proceeding.');
             html = redirectCheck.html;
             sessionCookies = redirectCheck.sessionCookies;
         } else {
             const $err = cheerio.load(html);
-            let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
+            let errMsg = $err('#msg').text() || 'Login failed.';
 
             const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
-            
             if (captchaCheck.found) {
                 const newLt = $err('input[name="lt"]').val() || lt;
                 const newExec = $err('input[name="execution"]').val() || execution;
+                // Try regex if jquery failed
                 let finalExec = newExec;
-                if (!finalExec || finalExec === execution) {
+                if (!finalExec) {
                     const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
                     if (execMatch) finalExec = execMatch[1];
                 }
@@ -426,7 +407,7 @@ export default async function handler(req, res) {
                     success: false,
                     requireCaptcha: true,
                     captchaImage: captchaCheck.image,
-                    message: errMsg.includes('验证') ? errMsg : "Verification code required.",
+                    message: "Verification code required.",
                     context: { 
                         sessionCookies, 
                         lt: newLt, 
@@ -445,10 +426,7 @@ export default async function handler(req, res) {
         console.log('[API] 3. Login Successful (302). Redirecting to:', redirectUrl);
 
         const jwLoginResponse = await axios.get(redirectUrl, {
-            headers: { 
-                ...BROWSER_HEADERS,
-                'Cookie': sessionCookies
-            },
+            headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies },
             maxRedirects: 0,
             validateStatus: (status) => status >= 200 && status < 400,
             responseType: 'text'
@@ -462,10 +440,7 @@ export default async function handler(req, res) {
     
     console.log('[API] 4. Fetching Course Data...');
     const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
-        headers: { 
-            ...BROWSER_HEADERS,
-            'Cookie': sessionCookies 
-        },
+        headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies },
         responseType: 'text'
     });
     
@@ -474,7 +449,6 @@ export default async function handler(req, res) {
     pageHtml = jwRedirectResult.html;
     sessionCookies = jwRedirectResult.sessionCookies;
 
-    // --- STEP 4.2: Parse Data ---
     const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
     const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
 
@@ -482,23 +456,19 @@ export default async function handler(req, res) {
         const stdId = studentIdMatch[1];
         const bizId = bizTypeIdMatch[1];
         const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
-        
-        console.log(`[API] Found StudentID: ${stdId}. Fetching JSON...`);
         const dataResponse = await axios.get(apiUrl, { headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies } });
         return res.json({ success: true, data: dataResponse.data });
     } 
     
     const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s) || 
-                            pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
-                            pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
+                          pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
+                          pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
 
     if (activityMatch) {
-            console.log('[API] Found course data in script variable.');
             return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
     }
 
-    const $jw = cheerio.load(pageHtml);
-    const title = $jw('title').text() || "No Title";
+    const title = cheerio.load(pageHtml)('title').text() || "No Title";
     const snippet = (pageHtml && typeof pageHtml === 'string') ? pageHtml.substring(0, 2000).replace(/</g, '&lt;') : "Invalid Content";
     
     return res.status(500).json({ 
