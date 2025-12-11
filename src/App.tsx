@@ -61,6 +61,7 @@ const App: React.FC = () => {
 
     if (user && user.isLoggedIn) {
       const fetchCloud = async () => {
+        if (!isMounted) return;
         setSyncStatus('syncing');
         console.log(`[App] Loading cloud data for ${user.studentId}...`);
         
@@ -89,22 +90,29 @@ const App: React.FC = () => {
 
   // 2. Auto-Save Logic
   useEffect(() => {
+    let isMounted = true;
     if (!user || !isDataLoaded) return;
 
     const timeoutId = setTimeout(async () => {
+      if (!isMounted) return;
       setSyncStatus('syncing');
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
-      if (result.success) {
-        setSyncStatus('saved');
-        setTimeout(() => setSyncStatus('idle'), 2000);
-      } else {
-        setSyncStatus('error');
+      if (isMounted) {
+          if (result.success) {
+            setSyncStatus('saved');
+            setTimeout(() => { if(isMounted) setSyncStatus('idle'); }, 2000);
+          } else {
+            setSyncStatus('error');
+          }
       }
     }, 500);
 
     setConflicts(Utils.getConflicts(events));
-    return () => clearTimeout(timeoutId);
+    return () => { 
+        clearTimeout(timeoutId);
+        isMounted = false; 
+    };
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session
