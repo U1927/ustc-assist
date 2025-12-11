@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
@@ -47,7 +48,6 @@ const App: React.FC = () => {
 
   // 1. Initialization
   useEffect(() => {
-    // Load Local Session
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
@@ -56,7 +56,7 @@ const App: React.FC = () => {
 
   // Separate effect for loading cloud data
   useEffect(() => {
-    let isActive = true; // Local flag to track THIS specific effect execution
+    let isActive = true;
 
     if (user && user.isLoggedIn) {
       const fetchCloud = async () => {
@@ -84,16 +84,14 @@ const App: React.FC = () => {
       fetchCloud();
     }
 
-    return () => {
-      isActive = false; // Cancel updates if component unmounts or user changes
-    };
+    return () => { isActive = false; };
   }, [user?.studentId]);
 
   // 2. Auto-Save Logic
   useEffect(() => {
+    let isActive = true;
     if (!user || !isDataLoaded) return;
 
-    let isActive = true;
     const timeoutId = setTimeout(async () => {
       if (!isActive) return;
       setSyncStatus('syncing');
@@ -113,8 +111,8 @@ const App: React.FC = () => {
     setConflicts(Utils.getConflicts(events));
     
     return () => {
-      isActive = false;
       clearTimeout(timeoutId);
+      isActive = false;
     };
   }, [events, todos, user, isDataLoaded]);
 
@@ -218,90 +216,74 @@ const App: React.FC = () => {
     };
 
     if (Utils.checkForConflicts(item, events)) {
-       if (!confirm("Conflict detected! Add anyway?")) return;
+       if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
     }
 
-    setEvents(prev => [...prev, item]);
+    setEvents([...events, item]);
     setShowAddModal(false);
     setNewEvent({ type: 'activity', startTime: '', endTime: '' });
   };
 
   const handleAddCourseSeries = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.settings.semester) {
-      alert("Please configure semester start date in settings first!");
-      return;
-    }
-    if (!courseForm.title) {
-       alert("Course title is required");
-       return;
+    if (!courseForm.title || !user?.settings.semester?.startDate) {
+        alert("Please enter title and ensure semester start date is set.");
+        return;
     }
 
-    const { weekStart, weekEnd, schedule, title, location, textbook } = courseForm;
-    const { startDate } = user.settings.semester;
     const newItems: ScheduleItem[] = [];
+    const semesterStart = user.settings.semester.startDate;
 
-    for (let w = weekStart; w <= weekEnd; w++) {
-      schedule.forEach(slot => {
-        const { day, periods } = slot;
-        const [startP, endP] = periods.split('-').map(Number);
-        
-        if (Utils.USTC_TIME_SLOTS[startP] && Utils.USTC_TIME_SLOTS[endP]) {
-          const startTimeStr = Utils.USTC_TIME_SLOTS[startP].start;
-          const endTimeStr = Utils.USTC_TIME_SLOTS[endP].end;
-          
-          const startDt = Utils.calculateClassDate(startDate, w, day, startTimeStr);
-          const endDt = Utils.calculateClassDate(startDate, w, day, endTimeStr);
+    // Iterate weeks
+    for (let w = courseForm.weekStart; w <= courseForm.weekEnd; w++) {
+        courseForm.schedule.forEach(slot => {
+             // Find time slots
+             const periods = slot.periods.split('-').map(Number);
+             const startPeriod = periods[0];
+             const endPeriod = periods[periods.length - 1];
 
-          newItems.push({
-            id: crypto.randomUUID(),
-            title: title,
-            location: location || 'Classroom',
-            type: 'course',
-            startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
-            endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
-            textbook: textbook,
-            description: `Week ${w} Course`
-          });
-        }
-      });
+             const startConfig = Utils.USTC_TIME_SLOTS[startPeriod];
+             const endConfig = Utils.USTC_TIME_SLOTS[endPeriod];
+
+             if (startConfig && endConfig) {
+                 const startDt = Utils.calculateClassDate(semesterStart, w, slot.day, startConfig.start);
+                 const endDt = Utils.calculateClassDate(semesterStart, w, slot.day, endConfig.end);
+
+                 newItems.push({
+                     id: crypto.randomUUID(),
+                     title: courseForm.title,
+                     location: courseForm.location || 'TBD',
+                     type: 'course',
+                     startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
+                     endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
+                     textbook: courseForm.textbook,
+                     description: `Week ${w} Class`
+                 });
+             }
+        });
     }
 
-    if (newItems.length > 0 && Utils.checkForConflicts(newItems[0], events)) {
-      if(!confirm(`Potential conflict detected in Week ${weekStart}. Add ${newItems.length} course sessions anyway?`)) return;
-    }
-
-    setEvents(prev => [...prev, ...newItems]);
+    setEvents([...events, ...newItems]);
     setShowAddModal(false);
-    alert(`Added ${newItems.length} class sessions to the calendar.`);
+    setCourseForm({
+        title: '',
+        location: '',
+        textbook: '',
+        weekStart: 1,
+        weekEnd: 18,
+        schedule: [{ day: 1, periods: '3-4' }]
+    });
+    alert(`Added ${newItems.length} course sessions!`);
   };
 
-  const handleDeleteEvent = (id: string) => {
-    if (confirm('Delete this event?')) {
-      setEvents(events.filter(e => e.id !== id));
-      setSelectedEvent(null);
-    }
-  };
-
-  const handleGeneratePlan = async () => {
-    setIsLoadingAI(true);
-    const topics = todos.filter(t => !t.isCompleted).map(t => t.content).join(", ") || "General Revision";
-    const newPlan = await generateStudyPlan(events, topics);
-    if (newPlan.length > 0) {
-       setEvents(prev => [...prev, ...newPlan]);
-    } else {
-       alert("AI Plan generation failed. Check API Key.");
-    }
-    setIsLoadingAI(false);
-  };
-
+  // --- TODO LOGIC ---
   const handleAddTodo = (content: string, deadline?: string, priority: Priority = 'medium') => {
     const todo: TodoItem = {
       id: crypto.randomUUID(),
       content,
       deadline,
       isCompleted: false,
-      isExpired: false,
+      isExpired: false, 
       tags: [],
       priority
     };
@@ -316,6 +298,25 @@ const App: React.FC = () => {
     setTodos(todos.filter(t => t.id !== id));
   };
 
+  const handleDeleteEvent = (id: string) => {
+    if (confirm('Delete this event?')) {
+      setEvents(events.filter(e => e.id !== id));
+      if (selectedEvent?.id === id) setSelectedEvent(null);
+    }
+  };
+
+  const handleGeneratePlan = async () => {
+    setIsLoadingAI(true);
+    const topics = todos.filter(t => !t.isCompleted).map(t => t.content).join(", ") || "General Revision";
+    const newPlan = await generateStudyPlan(events, topics);
+    if (newPlan.length > 0) {
+       setEvents(prev => [...prev, ...newPlan]);
+    } else {
+       alert("Could not generate a plan. Ensure API Key is set.");
+    }
+    setIsLoadingAI(false);
+  };
+
   const navigateDate = (direction: 'prev' | 'next') => {
      if (viewMode === ViewMode.WEEK) {
        setCurrentDate(d => direction === 'prev' ? addWeeks(d, -1) : addWeeks(d, 1));
@@ -324,32 +325,43 @@ const App: React.FC = () => {
      }
   };
 
-  const renderSyncStatus = () => {
-    switch(syncStatus) {
-      case 'syncing': return <span className="flex items-center gap-1 text-blue-600 text-xs"><Loader2 className="animate-spin" size={12}/> Syncing...</span>;
-      case 'saved': return <span className="flex items-center gap-1 text-green-600 text-xs font-bold"><CheckCircle size={12}/> Saved</span>;
-      case 'error': return <span className="flex items-center gap-1 text-red-600 text-xs font-bold"><WifiOff size={12}/> Sync Error</span>;
-      default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Cloud Ready</span>;
-    }
-  };
-
-  if (!user) return <Login onLogin={handleLogin} />;
+  if (!user) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-slate-800">
+      
+      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm z-10">
+        <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 relative">
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-blue-900 tracking-tight flex items-center gap-2">
-              <span className="bg-blue-900 text-white p-1 rounded text-xs">USTC</span> Assistant
+              <span className="bg-blue-900 text-white p-1 rounded text-xs">USTC</span>
+              Assistant
             </h1>
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <button onClick={() => setViewMode(ViewMode.WEEK)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Week</button>
-              <button onClick={() => setViewMode(ViewMode.MONTH)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Month</button>
+              <button 
+                onClick={() => setViewMode(ViewMode.WEEK)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}
+              >
+                Week
+              </button>
+              <button 
+                onClick={() => setViewMode(ViewMode.MONTH)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}
+              >
+                Month
+              </button>
             </div>
+            
             <div className="flex items-center gap-2">
               <button onClick={() => navigateDate('prev')} className="p-1 hover:bg-gray-100 rounded"><ChevronLeft size={20} /></button>
-              <span className="text-sm font-semibold w-32 text-center">{viewMode === ViewMode.WEEK ? `Week of ${format(currentDate, 'MMM d')}` : format(currentDate, 'MMMM yyyy')}</span>
+              <span className="text-sm font-semibold w-32 text-center">
+                {viewMode === ViewMode.WEEK ? 
+                  `Week of ${format(currentDate, 'MMM d')}` : 
+                  format(currentDate, 'MMMM yyyy')}
+              </span>
               <button onClick={() => navigateDate('next')} className="p-1 hover:bg-gray-100 rounded"><ChevronRight size={20} /></button>
             </div>
             <button 
@@ -359,34 +371,48 @@ const App: React.FC = () => {
               Today
             </button>
           </div>
+
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 text-sm text-gray-600">
-               <span className="font-mono bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{user.studentId}</span>
-               <span className="font-medium">{user.name}</span>
+             {/* Sync Status Indicator */}
+             <div className="flex items-center gap-1.5 text-xs font-medium px-2 py-1 bg-gray-50 rounded-full border border-gray-100">
+                {syncStatus === 'idle' && <Cloud size={14} className="text-gray-400" />}
+                {syncStatus === 'syncing' && <Loader2 size={14} className="text-blue-500 animate-spin" />}
+                {syncStatus === 'saved' && <CheckCircle size={14} className="text-green-500" />}
+                {syncStatus === 'error' && <WifiOff size={14} className="text-red-500" />}
+                <span className={`${syncStatus === 'error' ? 'text-red-500' : 'text-gray-500'}`}>
+                   {syncStatus === 'idle' ? 'Synced' : syncStatus === 'syncing' ? 'Saving...' : syncStatus === 'saved' ? 'Saved' : 'Offline'}
+                </span>
              </div>
-             <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition"><Plus size={16} /> New</button>
-             <button onClick={() => setShowSettingsModal(true)} className="text-gray-400 hover:text-blue-600 p-1"><Settings size={20} /></button>
-             <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 p-1"><LogOut size={20} /></button>
+
+             <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100">
+               <span className="font-mono font-bold text-gray-700">{user.studentId}</span>
+               {/* <span className="w-px h-3 bg-gray-300 mx-1"></span>
+               <span className="font-medium max-w-[100px] truncate">{user.name}</span> */}
+             </div>
+             
+             <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition active:scale-95">
+               <Plus size={16} /> Add
+             </button>
+             <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition p-1 hover:bg-gray-100 rounded">
+               <LogOut size={20} />
+             </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-hidden p-4 flex flex-col">
-          <div className="flex-1 overflow-hidden">
-             <CalendarView 
-               mode={viewMode} 
-               currentDate={currentDate} 
-               events={events} 
-               todos={todos}
-               onDeleteEvent={handleDeleteEvent} 
-               onSelectEvent={setSelectedEvent}
-             />
-          </div>
-          <div className="h-6 mt-1 flex items-center justify-end px-2 bg-gray-50 border-t border-gray-200 rounded-b-lg">
-             {renderSyncStatus()}
-          </div>
+        {/* Calendar Grid */}
+        <main className="flex-1 overflow-hidden p-4 relative">
+          <CalendarView 
+            mode={viewMode}
+            currentDate={currentDate}
+            events={events}
+            todos={todos}
+            onDeleteEvent={handleDeleteEvent}
+            onSelectEvent={setSelectedEvent}
+          />
         </main>
       </div>
 
+      {/* Right Sidebar */}
       <Sidebar 
         todos={todos}
         onAddTodo={handleAddTodo}
@@ -399,202 +425,258 @@ const App: React.FC = () => {
         isLoadingAI={isLoadingAI}
       />
 
+      {/* Modals */}
       <SettingsDialog 
-        isOpen={showSettingsModal} 
-        onClose={() => setShowSettingsModal(false)} 
-        settings={user.settings} 
-        onSave={handleUpdateSettings} 
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        settings={user.settings}
+        onSave={handleUpdateSettings}
         onForceSync={handleForceSync}
         onChangePassword={handleChangePassword}
       />
 
-      <ImportDialog
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        onImport={handleImportJson}
+      <ImportDialog 
+         isOpen={showImportModal}
+         onClose={() => setShowImportModal(false)}
+         onImport={handleImportJson}
       />
 
-      {/* EVENT DETAIL MODAL */}
+      {/* Event Details Popover */}
       {selectedEvent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-           <div className="bg-white rounded-xl shadow-2xl w-[400px] max-w-full animate-in zoom-in-95 duration-200 overflow-hidden">
-             <div className="bg-gray-50 px-6 py-4 border-b flex justify-between items-start">
-                <div>
-                   <span className="text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">{selectedEvent.type}</span>
-                   <h2 className="text-xl font-bold text-gray-900 mt-1">{selectedEvent.title}</h2>
-                </div>
-                <button onClick={() => setSelectedEvent(null)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
-             </div>
-             
-             <div className="p-6 space-y-4">
-               <div className="flex items-center gap-3 text-gray-700">
-                  <Clock className="text-gray-400" size={18} />
-                  <div>
-                    <div className="text-sm font-semibold">{format(new Date(selectedEvent.startTime), 'EEEE, MMMM d')}</div>
-                    <div className="text-xs text-gray-500">
-                      {format(new Date(selectedEvent.startTime), 'HH:mm')} - {format(new Date(selectedEvent.endTime), 'HH:mm')}
-                    </div>
-                  </div>
+         <div className="fixed inset-0 bg-black/20 z-40 flex items-center justify-center backdrop-blur-sm" onClick={() => setSelectedEvent(null)}>
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+               <div className="flex justify-between items-start mb-4">
+                  <h3 className="text-lg font-bold text-gray-800 leading-tight">{selectedEvent.title}</h3>
+                  <button onClick={() => setSelectedEvent(null)} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
                </div>
                
-               <div className="flex items-center gap-3 text-gray-700">
-                  <MapPin className="text-gray-400" size={18} />
-                  <div className="text-sm font-medium">{selectedEvent.location}</div>
+               <div className="space-y-3 text-sm text-gray-600">
+                  <div className="flex items-center gap-2">
+                     <Clock size={16} className="text-blue-500"/>
+                     <span>
+                        {format(new Date(selectedEvent.startTime), 'EEE, HH:mm')} - {format(new Date(selectedEvent.endTime), 'HH:mm')}
+                     </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <MapPin size={16} className="text-red-500"/>
+                     <span>{selectedEvent.location}</span>
+                  </div>
+                  {selectedEvent.textbook && (
+                     <div className="flex items-center gap-2">
+                        <BookOpen size={16} className="text-green-500"/>
+                        <span>{selectedEvent.textbook}</span>
+                     </div>
+                  )}
+                  {selectedEvent.description && (
+                     <div className="flex items-start gap-2 bg-gray-50 p-2 rounded">
+                        <AlignLeft size={16} className="text-gray-400 mt-0.5"/>
+                        <p className="text-xs leading-relaxed">{selectedEvent.description}</p>
+                     </div>
+                  )}
                </div>
 
-               {selectedEvent.textbook && (
-                 <div className="flex items-center gap-3 text-gray-700">
-                    <BookOpen className="text-gray-400" size={18} />
-                    <div className="text-sm">{selectedEvent.textbook}</div>
-                 </div>
-               )}
-
-               {selectedEvent.description && (
-                 <div className="flex items-start gap-3 text-gray-700 pt-2 border-t">
-                    <AlignLeft className="text-gray-400 mt-1" size={18} />
-                    <div className="text-sm text-gray-600 leading-relaxed">{selectedEvent.description}</div>
-                 </div>
-               )}
-             </div>
-
-             <div className="bg-gray-50 px-6 py-3 border-t flex justify-between items-center">
-                <button 
-                  onClick={() => handleDeleteEvent(selectedEvent.id)}
-                  className="text-red-600 text-sm font-medium hover:underline flex items-center gap-1"
-                >
-                  <Trash2 size={14} /> Delete Event
-                </button>
-                <button onClick={() => setSelectedEvent(null)} className="bg-white border border-gray-300 text-gray-700 px-4 py-1.5 rounded text-sm hover:bg-gray-100">
-                  Close
-                </button>
-             </div>
-           </div>
-        </div>
+               <div className="mt-6 pt-4 border-t flex justify-end gap-2">
+                  <button 
+                     onClick={() => handleDeleteEvent(selectedEvent.id)}
+                     className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition"
+                  >
+                     <Trash2 size={14}/> Delete
+                  </button>
+                  <button 
+                     onClick={() => setSelectedEvent(null)}
+                     className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-xs font-bold transition"
+                  >
+                     Close
+                  </button>
+               </div>
+            </div>
+         </div>
       )}
 
-      {/* ADD MODAL */}
+      {/* Add Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full m-4 animate-in fade-in zoom-in duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="flex border-b border-gray-200">
-              <button 
-                onClick={() => setAddMode('single')} 
-                className={`flex-1 py-3 text-sm font-bold ${addMode === 'single' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'bg-gray-50 text-gray-500'}`}
-              >
-                One-time Event
-              </button>
-              <button 
-                onClick={() => setAddMode('course')} 
-                className={`flex-1 py-3 text-sm font-bold ${addMode === 'course' ? 'bg-white text-blue-600 border-b-2 border-blue-600' : 'bg-gray-50 text-gray-500'}`}
-              >
-                Add Course (Term)
-              </button>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b flex justify-between items-center">
+               <h2 className="text-lg font-bold text-gray-800">Add to Schedule</h2>
+               <button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
             </div>
 
+            {/* Tabs */}
+            <div className="flex border-b">
+               <button 
+                 onClick={() => setAddMode('single')}
+                 className={`flex-1 py-2 text-sm font-medium ${addMode === 'single' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+               >
+                 Single Event
+               </button>
+               <button 
+                 onClick={() => setAddMode('course')}
+                 className={`flex-1 py-2 text-sm font-medium ${addMode === 'course' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+               >
+                 Course Series
+               </button>
+            </div>
+            
             <div className="p-6 overflow-y-auto">
               {addMode === 'single' ? (
                 <form onSubmit={handleAddSingleEvent} className="space-y-3">
-                  <input className="w-full border p-2 rounded text-sm" placeholder="Title" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
-                  <select className="w-full border p-2 rounded text-sm" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}>
+                  <input 
+                    className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                    placeholder="Title (e.g. Club Meeting)" 
+                    required
+                    value={newEvent.title || ''}
+                    onChange={e => setNewEvent({...newEvent, title: e.target.value})}
+                  />
+                  <select 
+                    className="w-full border p-2 rounded text-sm outline-none"
+                    value={newEvent.type}
+                    onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}
+                  >
                     <option value="activity">Activity</option>
                     <option value="exam">Exam</option>
-                    <option value="study">Study</option>
+                    <option value="study">Self Study</option>
                     <option value="course">Makeup Class</option>
                   </select>
-                  <input className="w-full border p-2 rounded text-sm" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
+                  <input 
+                    className="w-full border p-2 rounded text-sm outline-none" 
+                    placeholder="Location" 
+                    value={newEvent.location || ''}
+                    onChange={e => setNewEvent({...newEvent, location: e.target.value})}
+                  />
+                  <textarea 
+                    className="w-full border p-2 rounded text-sm outline-none resize-none h-20" 
+                    placeholder="Description / Notes" 
+                    value={newEvent.description || ''}
+                    onChange={e => setNewEvent({...newEvent, description: e.target.value})}
+                  />
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs text-gray-500 block mb-1">Start</label>
-                      <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} />
+                      <input 
+                        type="datetime-local" 
+                        required
+                        className="w-full border p-2 rounded text-xs"
+                        value={newEvent.startTime}
+                        onChange={e => setNewEvent({...newEvent, startTime: e.target.value})}
+                      />
                     </div>
                     <div>
                       <label className="text-xs text-gray-500 block mb-1">End</label>
-                      <input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} />
+                      <input 
+                        type="datetime-local" 
+                        required
+                        className="w-full border p-2 rounded text-xs"
+                        value={newEvent.endTime}
+                        onChange={e => setNewEvent({...newEvent, endTime: e.target.value})}
+                      />
                     </div>
                   </div>
-                  <div className="flex gap-2 mt-4 pt-2 border-t">
-                     <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button>
-                     <button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Event</button>
-                  </div>
+                  <button type="submit" className="w-full py-2.5 mt-2 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700">Add Event</button>
                 </form>
               ) : (
                 <form onSubmit={handleAddCourseSeries} className="space-y-4">
-                  <div>
-                    <input className="w-full border p-2 rounded text-sm font-medium" placeholder="Course Name (e.g. Math Analysis)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                     <input className="w-full border p-2 rounded text-sm" placeholder="Location (e.g. 3A201)" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} />
-                     <input className="w-full border p-2 rounded text-sm" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} />
-                  </div>
-                  
-                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                     <label className="text-xs font-bold text-blue-700 mb-2 block">Teaching Weeks (Semester: {user?.settings.semester?.name || 'Default'})</label>
-                     <div className="flex items-center gap-2">
-                       <span className="text-sm">Week</span>
-                       <input type="number" min={1} max={20} className="w-14 text-center border p-1 rounded text-sm" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} />
-                       <span className="text-sm">to</span>
-                       <input type="number" min={1} max={20} className="w-14 text-center border p-1 rounded text-sm" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} />
-                     </div>
-                  </div>
+                   <div className="space-y-2">
+                      <input 
+                        className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" 
+                        placeholder="Course Name (e.g. Linear Algebra)" 
+                        required
+                        value={courseForm.title}
+                        onChange={e => setCourseForm({...courseForm, title: e.target.value})}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input 
+                            className="w-full border p-2 rounded text-sm outline-none" 
+                            placeholder="Location (e.g. 3C102)" 
+                            value={courseForm.location}
+                            onChange={e => setCourseForm({...courseForm, location: e.target.value})}
+                        />
+                        <input 
+                            className="w-full border p-2 rounded text-sm outline-none" 
+                            placeholder="Textbook" 
+                            value={courseForm.textbook}
+                            onChange={e => setCourseForm({...courseForm, textbook: e.target.value})}
+                        />
+                      </div>
+                   </div>
 
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                       <label className="text-xs font-bold text-gray-600 uppercase">Class Sessions</label>
-                       <button 
-                         type="button" 
-                         onClick={() => setCourseForm({...courseForm, schedule: [...courseForm.schedule, { day: 1, periods: '3-4' }]})}
-                         className="text-xs bg-gray-100 px-2 py-1 rounded text-blue-600 hover:bg-blue-50 font-medium"
-                       >
-                         + Add Slot
-                       </button>
-                    </div>
-                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                       {courseForm.schedule.map((slot, idx) => (
-                         <div key={idx} className="flex items-center gap-2">
-                           <select 
-                             className="flex-1 border p-1.5 rounded text-sm"
-                             value={slot.day}
-                             onChange={e => {
-                               const newSchedule = [...courseForm.schedule];
-                               newSchedule[idx].day = Number(e.target.value);
-                               setCourseForm({...courseForm, schedule: newSchedule});
-                             }}
-                           >
-                             <option value={1}>Monday</option>
-                             <option value={2}>Tuesday</option>
-                             <option value={3}>Wednesday</option>
-                             <option value={4}>Thursday</option>
-                             <option value={5}>Friday</option>
-                             <option value={6}>Saturday</option>
-                             <option value={7}>Sunday</option>
-                           </select>
-                           <select 
-                              className="w-24 border p-1.5 rounded text-sm"
-                              value={slot.periods}
-                              onChange={e => {
-                                 const newSchedule = [...courseForm.schedule];
-                                 newSchedule[idx].periods = e.target.value;
-                                 setCourseForm({...courseForm, schedule: newSchedule});
-                              }}
-                           >
-                             {Utils.COMMON_PERIODS.map(p => (
-                               <option key={p.label} value={`${p.start}-${p.end}`}>{p.label}</option>
-                             ))}
-                           </select>
-                           {courseForm.schedule.length > 1 && (
-                             <button type="button" onClick={() => setCourseForm({...courseForm, schedule: courseForm.schedule.filter((_, i) => i !== idx)})} className="text-gray-400 hover:text-red-500">
-                               <Trash2 size={16} />
-                             </button>
-                           )}
-                         </div>
-                       ))}
-                    </div>
-                  </div>
+                   <div className="bg-gray-50 p-3 rounded-lg space-y-3">
+                      <h3 className="text-xs font-bold text-gray-500 uppercase">Schedule Logic</h3>
+                      
+                      <div className="flex items-center gap-2 text-sm">
+                         <span className="text-gray-600">Weeks:</span>
+                         <input 
+                            type="number" min="1" max="30"
+                            className="w-16 border p-1 rounded text-center outline-none"
+                            value={courseForm.weekStart}
+                            onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})}
+                         />
+                         <span className="text-gray-400">-</span>
+                         <input 
+                            type="number" min="1" max="30"
+                            className="w-16 border p-1 rounded text-center outline-none"
+                            value={courseForm.weekEnd}
+                            onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})}
+                         />
+                      </div>
 
-                  <div className="flex gap-2 pt-2 border-t">
-                     <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 py-2 text-sm text-gray-600 bg-gray-100 rounded">Cancel</button>
-                     <button type="submit" className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Add Course Series</button>
-                  </div>
+                      <div className="space-y-2">
+                         {courseForm.schedule.map((slot, idx) => (
+                             <div key={idx} className="flex gap-2">
+                                <select 
+                                  className="flex-1 border p-1.5 rounded text-sm outline-none"
+                                  value={slot.day}
+                                  onChange={e => {
+                                      const newSched = [...courseForm.schedule];
+                                      newSched[idx].day = Number(e.target.value);
+                                      setCourseForm({...courseForm, schedule: newSched});
+                                  }}
+                                >
+                                    {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d, i) => (
+                                        <option key={d} value={i+1}>{d}</option>
+                                    ))}
+                                </select>
+                                <select
+                                  className="flex-1 border p-1.5 rounded text-sm outline-none"
+                                  value={slot.periods}
+                                  onChange={e => {
+                                      const newSched = [...courseForm.schedule];
+                                      newSched[idx].periods = e.target.value;
+                                      setCourseForm({...courseForm, schedule: newSched});
+                                  }}
+                                >
+                                    {Utils.COMMON_PERIODS.map(p => (
+                                        <option key={p.label} value={`${p.start}-${p.end}`}>{p.label}</option>
+                                    ))}
+                                </select>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                     const newSched = courseForm.schedule.filter((_, i) => i !== idx);
+                                     setCourseForm({...courseForm, schedule: newSched});
+                                  }}
+                                  className="text-red-400 hover:text-red-600 px-1"
+                                >
+                                   <Trash2 size={16}/>
+                                </button>
+                             </div>
+                         ))}
+                         <button 
+                           type="button"
+                           onClick={() => setCourseForm({
+                               ...courseForm, 
+                               schedule: [...courseForm.schedule, { day: 1, periods: '3-4' }]
+                           })}
+                           className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                         >
+                            <Plus size={12}/> Add Another Time Slot
+                         </button>
+                      </div>
+                   </div>
+
+                   <button type="submit" className="w-full py-2.5 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700 shadow-md">
+                       Generate & Add Course
+                   </button>
                 </form>
               )}
             </div>
