@@ -21,10 +21,12 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   try {
     console.log("USTC Assistant: 开始抓取...");
     const html = document.body.innerHTML;
+    let json = null;
     
-    // 1. Find Student ID
+    // 1. Find IDs
     const idMatch = html.match(/studentId[:\\s"']+(\\d+)/);
     const bizMatch = html.match(/bizTypeId[:\\s"']+(\\d+)/);
+    const semMatch = html.match(/semesterId[:\\s"']+(\\d+)/);
     
     if(!idMatch) {
         alert("❌ 无法找到学号信息。\\n请确保您已经登录，并且处于【学生课表查询】页面。");
@@ -35,12 +37,51 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     const bizId = bizMatch ? bizMatch[1] : 2;
     console.log("Found ID:", stdId);
 
-    // 2. Fetch Data using User's Session
-    const url = \`https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=\${bizId}&studentId=\${stdId}\`;
-    const res = await fetch(url);
-    const json = await res.json();
+    // 2. Attempt API Fetch (Primary Method)
+    try {
+        let url = \`https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=\${bizId}&studentId=\${stdId}\`;
+        if (semMatch) {
+            url += \`&semesterId=\${semMatch[1]}\`;
+            console.log("Found Semester:", semMatch[1]);
+        }
+        
+        console.log("Fetching URL:", url);
+        const res = await fetch(url);
+        if (res.ok) {
+            json = await res.json();
+            console.log("API Fetch Success");
+        } else {
+            console.warn("API Fetch returned status:", res.status);
+        }
+    } catch (err) {
+        console.warn("API Fetch Failed:", err);
+    }
+
+    // 3. Fallback: Extract from Source Code (Secondary Method)
+    if (!json) {
+        console.log("Attempting to extract from page source...");
+        // Try to match the 'lessonList' or 'activities' variable in the script tags
+        // This regex is a 'best effort' to catch the array definition
+        const scriptMatch = html.match(/lessonList\\s*:\\s*(\\[.*?\\])(?:,\\s*[a-zA-Z]+:|$)/s) || 
+                            html.match(/activities\\s*:\\s*(\\[.*?\\])(?:,\\s*[a-zA-Z]+:|$)/s) ||
+                            html.match(/var\\s+activities\\s*=\s*(\\[.*?\\]);/s);
+                            
+        if (scriptMatch) {
+            try {
+                // Warning: Regex parsing JSON is risky if nested, but works for flat lesson lists
+                json = JSON.parse(scriptMatch[1]);
+                console.log("Source Extraction Success");
+            } catch (e) {
+                console.error("JSON Parse Error on source extraction", e);
+            }
+        }
+    }
+
+    if (!json) {
+        throw new Error("无法获取数据 (API请求失败且无法从源码提取)。请尝试【手动粘贴 JSON】方式。");
+    }
     
-    // 3. Send back to App
+    // 4. Send back to App
     if (window.opener) {
         window.opener.postMessage({ type: 'USTC_DATA_IMPORT', payload: json }, '*');
         alert("✅ 课表数据已发送至 USTC Assistant！\\n您可以关闭此窗口了。");
@@ -53,7 +94,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         input.select();
         document.execCommand('copy');
         document.body.removeChild(input);
-        alert("✅ 无法自动传回数据，但已复制到剪贴板！\\n请返回应用并手动粘贴。");
+        alert("✅ 无法自动传回数据，但已复制到剪贴板！\\n请返回应用切换到【手动粘贴 JSON】标签页并粘贴。");
     }
   } catch (e) {
     alert("❌ 抓取失败: " + e.message);
