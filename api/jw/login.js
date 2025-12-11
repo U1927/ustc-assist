@@ -115,24 +115,33 @@ export default async function handler(req, res) {
 
         // 2. Fallback: Robust Greedy Regex for Tokens
         
-        // Regex for LT: LT- followed by alphanumeric, dashes, dots, underscores
+        // Regex for LT
         if (!lt) {
-            const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
-            if (ltMatch) lt = ltMatch[1];
+            // Try explicit input match first
+            const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
+                                 html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
+            if (ltInputMatch) {
+                lt = ltInputMatch[1] || ltInputMatch[2];
+            } else {
+                // Try format match (LT-...)
+                const ltFormatMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
+                if (ltFormatMatch) lt = ltFormatMatch[1];
+            }
         }
 
         // Regex for Execution
         if (!execution) {
             // Pattern 1: input tag structure (name="execution" ... value="val" OR value="val" ... name="execution")
-            // This handles cases where cheerio might miss it due to malformed HTML
-            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']|value=["']([^"']+)["'][^>]*name=["']execution["']/i;
-            const inputMatch = html.match(inputRegex);
-            if (inputMatch) execution = inputMatch[1] || inputMatch[2];
+            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
+            const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
+            
+            const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
+            if (inputMatch) execution = inputMatch[1];
         }
 
         if (!execution) {
              // Pattern 2: Look for typical eXsX pattern anywhere (e.g. e1s1)
-             // This is the most common CAS execution key format
+             // Only use this if explicit input parsing failed
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
         }
@@ -153,15 +162,15 @@ export default async function handler(req, res) {
 
         // 4. Critical Token Validation (LT is now optional)
         if (!execution) {
-             const title = $('title').text();
+             const title = $('title').text() || "No Title Found";
              // Grab snippet around "execution" if possible, or just head
-             const snippet = html.substring(0, 800).replace(/</g, '&lt;');
+             const snippet = html.substring(0, 1000).replace(/</g, '&lt;');
              console.error(`[API] Parsing Failed. Title: ${title}`);
              
              return res.status(500).json({ 
                  success: false, 
-                 error: `CAS Page Parsing Failed. System might have changed.`,
-                 debugHtml: `Title: ${title}\n\nSnippet:\n${snippet}`
+                 error: `CAS Page Parsing Failed. The page might be blocked or changed.`,
+                 debugHtml: `Page Title: ${title}\n\nHTML Snippet:\n${snippet}`
              });
         }
     }
