@@ -6,6 +6,7 @@ import * as cheerio from 'cheerio';
 const getCookies = (response) => {
   const setCookie = response.headers['set-cookie'];
   if (!setCookie) return '';
+  // Axios returns array for set-cookie
   return setCookie.map(c => c.split(';')[0]).join('; ');
 };
 
@@ -14,7 +15,6 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
   const $ = cheerio.load(html);
   
   // 1. Detect Captcha Elements
-  // USTC CAS usually uses id="validateImg" or src containing "validateCode"
   let captchaImg = $('#validateImg'); 
   let hasCaptcha = captchaImg.length > 0 || html.includes('validateCode') || html.includes('vcode');
 
@@ -70,7 +70,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
     let currentUrl = initialUrl;
     let sessionCookies = cookies;
     let redirectCount = 0;
-    const MAX_REDIRECTS = 5; // Increased depth for safety
+    const MAX_REDIRECTS = 7; // Generous limit for SSO chains
 
     while (redirectCount < MAX_REDIRECTS) {
         let redirectUrl = null;
@@ -84,18 +84,25 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
         // 2. Check JS Redirect
         if (!redirectUrl) {
-            // Pattern A: Assignment -> window.location.href = "url";
-            const jsAssignment = html.match(/(?:location\.href|window\.location)\s*=\s*['"]([^'"]+)['"]/);
+            // Pattern A: Assignment -> window.location.href = "url"; location = "url";
+            // Matches: location.href="...", window.location='...', location = "..."
+            const jsAssignment = html.match(/(?:window\.|self\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
             
             // Pattern B: Method Call -> window.location.replace("url");
-            const jsReplace = html.match(/(?:location\.replace|window\.location\.replace)\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+            const jsCall = html.match(/(?:window\.|self\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
+            
+            // Pattern C: Window Navigate
+            const jsNavigate = html.match(/window\.navigate\s*\(\s*["']([^"']+)["']\s*\)/);
 
             if (jsAssignment) {
                 redirectUrl = jsAssignment[1];
                 console.log(`[API] JS Assignment Redirect detected (${redirectCount}):`, redirectUrl);
-            } else if (jsReplace) {
-                redirectUrl = jsReplace[1];
-                console.log(`[API] JS Replace Redirect detected (${redirectCount}):`, redirectUrl);
+            } else if (jsCall) {
+                redirectUrl = jsCall[1];
+                console.log(`[API] JS Method Redirect detected (${redirectCount}):`, redirectUrl);
+            } else if (jsNavigate) {
+                redirectUrl = jsNavigate[1];
+                console.log(`[API] JS Navigate Redirect detected (${redirectCount}):`, redirectUrl);
             }
         }
 
@@ -115,9 +122,12 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
         // Fetch Next Page
         try {
+            console.log(`[API] Following redirect to: ${redirectUrl}`);
             const res = await axios.get(redirectUrl, { 
-                headers: { ...headers, 'Cookie': sessionCookies } 
+                headers: { ...headers, 'Cookie': sessionCookies },
+                validateStatus: status => status < 400 // Accept redirects if axios doesn't auto-follow
             });
+            
             const newCookies = getCookies(res);
             if (newCookies) sessionCookies += '; ' + newCookies;
             
@@ -157,7 +167,11 @@ export default async function handler(req, res) {
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Connection': 'keep-alive',
     'Cache-Control': 'max-age=0',
-    'Upgrade-Insecure-Requests': '1'
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1'
   };
 
   let sessionCookies = '';
@@ -169,7 +183,7 @@ export default async function handler(req, res) {
     // --- STEP 1: PREPARE LOGIN CONTEXT ---
     
     if (context && context.sessionCookies && context.execution) {
-        // A. Resume from previous attempt (User submitted captcha)
+        // A. Resume from previous attempt
         console.log('[API] Resuming session with provided context.');
         sessionCookies = context.sessionCookies;
         lt = context.lt || ''; 
@@ -197,7 +211,7 @@ export default async function handler(req, res) {
         execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
-        // 2. Fallback: Robust Greedy Regex for Tokens
+        // 2. Fallback: Robust Greedy Regex
         if (!lt) {
             const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
                                  html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
@@ -210,6 +224,7 @@ export default async function handler(req, res) {
         }
 
         if (!execution) {
+            // Find inputs with name="execution"
             const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
             const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
             const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
@@ -217,11 +232,13 @@ export default async function handler(req, res) {
         }
 
         if (!execution) {
+             // Look for JS variables often used in SPA logins
              const scriptMatch = html.match(/["']?execution["']?\s*[:=]\s*["']([^"']+)["']/i);
              if (scriptMatch) execution = scriptMatch[1];
         }
 
         if (!execution) {
+             // Desperate regex for e1s1 style tokens
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
         }
@@ -292,6 +309,7 @@ export default async function handler(req, res) {
         const $err = cheerio.load(html);
         let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
 
+        // Check if just a verification error (Captcha needed after submit)
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
         
         if (captchaCheck.found) {
@@ -324,6 +342,7 @@ export default async function handler(req, res) {
         const redirectUrl = loginResponse.headers['location'];
         console.log('[API] 3. Login Successful. Redirecting to:', redirectUrl);
 
+        // Fetch the redirect target (usually middleware like ucas-sso)
         const jwLoginResponse = await axios.get(redirectUrl, {
             headers: { 
                 ...BROWSER_HEADERS,
@@ -351,6 +370,7 @@ export default async function handler(req, res) {
         sessionCookies = jwRedirectResult.sessionCookies;
 
         // --- STEP 4.2: Parse Data ---
+        // Strategy A: Find StudentID and call API
         const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
         const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
 
@@ -364,9 +384,13 @@ export default async function handler(req, res) {
             return res.json({ success: true, data: dataResponse.data });
         } 
         
-        const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
+        // Strategy B: Find embedded JSON in script tags (studentTableVm, lessonList, activities)
+        const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s) || 
+                              pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
+                              pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
+
         if (activityMatch) {
-             console.log('[API] Found activities variable directly.');
+             console.log('[API] Found course data in script variable.');
              return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
         }
 
