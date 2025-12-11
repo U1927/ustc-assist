@@ -1,7 +1,6 @@
-
 import React, { useState } from 'react';
 import { AppSettings } from '../types';
-import { Save, Sliders, X, CloudLightning, Lock, Calendar } from 'lucide-react';
+import { Save, Sliders, X, CloudLightning, Lock, Calendar, Eye, EyeOff } from 'lucide-react';
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -29,6 +28,11 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const [confirmPass, setConfirmPass] = useState('');
   const [passMessage, setPassMessage] = useState({ text: '', type: '' });
   const [isChangingPass, setIsChangingPass] = useState(false);
+  
+  // Visibility States
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
 
   if (!isOpen) return null;
 
@@ -178,28 +182,44 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
             </h3>
             <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                <div className="space-y-2">
-                 <input 
-                   type="password" 
-                   placeholder="Current Password"
-                   className="w-full text-sm p-2 border rounded focus:border-blue-500 outline-none"
-                   value={oldPass}
-                   onChange={e => setOldPass(e.target.value)}
-                 />
+                 <div className="relative">
+                   <input 
+                     type={showOldPass ? "text" : "password"} 
+                     placeholder="Current Password"
+                     className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
+                     value={oldPass}
+                     onChange={e => setOldPass(e.target.value)}
+                   />
+                   <button type="button" onClick={() => setShowOldPass(!showOldPass)} className="absolute right-2 top-2 text-gray-400 hover:text-gray-600">
+                     {showOldPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                   </button>
+                 </div>
+                 
                  <div className="grid grid-cols-2 gap-2">
-                   <input 
-                    type="password" 
-                    placeholder="New Password"
-                    className="w-full text-sm p-2 border rounded focus:border-blue-500 outline-none"
-                    value={newPass}
-                    onChange={e => setNewPass(e.target.value)}
-                   />
-                   <input 
-                    type="password" 
-                    placeholder="Confirm New"
-                    className="w-full text-sm p-2 border rounded focus:border-blue-500 outline-none"
-                    value={confirmPass}
-                    onChange={e => setConfirmPass(e.target.value)}
-                   />
+                   <div className="relative">
+                     <input 
+                      type={showNewPass ? "text" : "password"} 
+                      placeholder="New Password"
+                      className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
+                      value={newPass}
+                      onChange={e => setNewPass(e.target.value)}
+                     />
+                     <button type="button" onClick={() => setShowNewPass(!showNewPass)} className="absolute right-2 top-2 text-gray-400 hover:text-gray-600">
+                       {showNewPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                     </button>
+                   </div>
+                   <div className="relative">
+                     <input 
+                      type={showConfirmPass ? "text" : "password"} 
+                      placeholder="Confirm New"
+                      className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
+                      value={confirmPass}
+                      onChange={e => setConfirmPass(e.target.value)}
+                     />
+                     <button type="button" onClick={() => setShowConfirmPass(!showConfirmPass)} className="absolute right-2 top-2 text-gray-400 hover:text-gray-600">
+                       {showConfirmPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                     </button>
+                   </div>
                  </div>
                  
                  {passMessage.text && (
