@@ -47,7 +47,8 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
             responseType: 'arraybuffer',
             headers: { 
                 'Cookie': sessionCookies,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Referer': baseUrl
             }
         });
         const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');
@@ -61,6 +62,75 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
     }
   }
   return { found: false };
+};
+
+// Helper: Detect and follow manual redirects (Meta Refresh or JS)
+const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) => {
+    let html = initialHtml;
+    let currentUrl = initialUrl;
+    let sessionCookies = cookies;
+    let redirectCount = 0;
+    const MAX_REDIRECTS = 3;
+
+    while (redirectCount < MAX_REDIRECTS) {
+        let redirectUrl = null;
+
+        // 1. Check Meta Refresh: <meta http-equiv="refresh" content="0;url=...">
+        const metaMatch = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
+        if (metaMatch) {
+            redirectUrl = metaMatch[1];
+            console.log('[API] Meta Refresh detected:', redirectUrl);
+        }
+
+        // 2. Check JS Redirect
+        if (!redirectUrl) {
+            // Pattern A: Assignment -> window.location.href = "url";
+            const jsAssignment = html.match(/(?:location\.href|window\.location)\s*=\s*['"]([^'"]+)['"]/);
+            
+            // Pattern B: Method Call -> window.location.replace("url");
+            const jsReplace = html.match(/(?:location\.replace|window\.location\.replace)\s*\(\s*['"]([^'"]+)['"]\s*\)/);
+
+            if (jsAssignment) {
+                redirectUrl = jsAssignment[1];
+                console.log('[API] JS Assignment Redirect detected:', redirectUrl);
+            } else if (jsReplace) {
+                redirectUrl = jsReplace[1];
+                console.log('[API] JS Replace Redirect detected:', redirectUrl);
+            }
+        }
+
+        if (!redirectUrl) break; // No redirect found
+
+        // Resolve Relative URL
+        if (!redirectUrl.startsWith('http')) {
+            const origin = new URL(currentUrl).origin;
+            if (redirectUrl.startsWith('/')) {
+                redirectUrl = origin + redirectUrl;
+            } else {
+                // Determine base path
+                const path = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
+                redirectUrl = path + redirectUrl;
+            }
+        }
+
+        // Fetch Next Page
+        try {
+            const res = await axios.get(redirectUrl, { 
+                headers: { ...headers, 'Cookie': sessionCookies } 
+            });
+            const newCookies = getCookies(res);
+            if (newCookies) sessionCookies += '; ' + newCookies;
+            
+            html = res.data;
+            currentUrl = redirectUrl;
+            redirectCount++;
+        } catch (e) {
+            console.error('[API] Redirect fetch failed:', e.message);
+            break;
+        }
+    }
+
+    return { html, currentUrl, sessionCookies };
 };
 
 export default async function handler(req, res) {
@@ -81,6 +151,15 @@ export default async function handler(req, res) {
 
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
   
+  const BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1'
+  };
+
   let sessionCookies = '';
   let lt = '';
   let execution = '';
@@ -93,19 +172,25 @@ export default async function handler(req, res) {
         // A. Resume from previous attempt (User submitted captcha)
         console.log('[API] Resuming session with provided context.');
         sessionCookies = context.sessionCookies;
-        lt = context.lt || ''; // LT might be empty
+        lt = context.lt || ''; 
         execution = context.execution;
         eventId = context.eventId || 'submit';
     } else {
         // B. New Session: Fetch Login Page
         console.log('[API] 1. Fetching CAS login page (New Session)...');
-        const loginPage = await axios.get(CAS_LOGIN_URL, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
+        let loginPage = await axios.get(CAS_LOGIN_URL, { headers: BROWSER_HEADERS });
+        
         sessionCookies = getCookies(loginPage);
-        const html = loginPage.data;
+        let html = loginPage.data;
+        let currentUrl = CAS_LOGIN_URL;
+
+        // --- HANDLE PAGE REDIRECTS (WAF/SPA/Meta Refresh) ---
+        // Enhanced logic to follow sso_redirect or meta refresh pages
+        const redirectResult = await followPageRedirects(html, currentUrl, sessionCookies, BROWSER_HEADERS);
+        html = redirectResult.html;
+        currentUrl = redirectResult.currentUrl;
+        sessionCookies = redirectResult.sessionCookies;
+
         const $ = cheerio.load(html);
 
         // 1. Extract Tokens (Standard Selectors)
@@ -114,40 +199,36 @@ export default async function handler(req, res) {
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
         // 2. Fallback: Robust Greedy Regex for Tokens
-        
-        // Regex for LT
         if (!lt) {
-            // Try explicit input match first
             const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
                                  html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
             if (ltInputMatch) {
                 lt = ltInputMatch[1] || ltInputMatch[2];
             } else {
-                // Try format match (LT-...)
                 const ltFormatMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
                 if (ltFormatMatch) lt = ltFormatMatch[1];
             }
         }
 
-        // Regex for Execution
         if (!execution) {
-            // Pattern 1: input tag structure (name="execution" ... value="val" OR value="val" ... name="execution")
             const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
             const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
-            
             const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
             if (inputMatch) execution = inputMatch[1];
         }
 
         if (!execution) {
-             // Pattern 2: Look for typical eXsX pattern anywhere (e.g. e1s1)
-             // Only use this if explicit input parsing failed
+             const scriptMatch = html.match(/["']?execution["']?\s*[:=]\s*["']([^"']+)["']/i);
+             if (scriptMatch) execution = scriptMatch[1];
+        }
+
+        if (!execution) {
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
         }
         
         // 3. Early Captcha Check
-        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
+        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, currentUrl);
         
         if (captchaCheck.found) {
             console.log('[API] Captcha required during initial load.');
@@ -160,17 +241,16 @@ export default async function handler(req, res) {
             });
         }
 
-        // 4. Critical Token Validation (LT is now optional)
+        // 4. Critical Token Validation
         if (!execution) {
              const title = $('title').text() || "No Title Found";
-             // Grab snippet around "execution" if possible, or just head
-             const snippet = html.substring(0, 1000).replace(/</g, '&lt;');
+             const snippet = html.substring(0, 2000).replace(/</g, '&lt;');
              console.error(`[API] Parsing Failed. Title: ${title}`);
              
              return res.status(500).json({ 
                  success: false, 
                  error: `CAS Page Parsing Failed. The page might be blocked or changed.`,
-                 debugHtml: `Page Title: ${title}\n\nHTML Snippet:\n${snippet}`
+                 debugHtml: `Page Title: ${title}\n\nHTML Snippet (Top 2k chars):\n${snippet}`
              });
         }
     }
@@ -181,24 +261,23 @@ export default async function handler(req, res) {
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    // Only append LT if found (CAS 5+ sometimes drops LT)
     if (lt) params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
     
-    // Some CAS forms use 'submit' or 'login' for the button name
     if (!params.has('button')) params.append('button', 'login'); 
     
-    // Add Captcha if provided
     if (captchaCode) {
         params.append('vcode', captchaCode);
     }
 
     const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
       headers: {
+        ...BROWSER_HEADERS,
         'Content-Type': 'application/x-www-form-urlencoded',
         'Cookie': sessionCookies,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'Origin': 'https://passport.ustc.edu.cn',
+        'Referer': CAS_LOGIN_URL
       },
       maxRedirects: 0, 
       validateStatus: (status) => status >= 200 && status < 400
@@ -209,21 +288,16 @@ export default async function handler(req, res) {
 
     // --- STEP 3: HANDLE RESPONSE ---
 
-    // Scenario A: Still on Login Page (Failure or Captcha)
     if (loginResponse.status === 200) {
         const html = loginResponse.data;
         const $err = cheerio.load(html);
         let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
 
-        // Check for Captcha again
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
         
         if (captchaCheck.found) {
-            // Update tokens if they rotated
             const newLt = $err('input[name="lt"]').val() || lt;
             const newExec = $err('input[name="execution"]').val() || execution;
-
-            // Greedy regex fallback for rotated tokens
             let finalExec = newExec;
             if (!finalExec || finalExec === execution) {
                  const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
@@ -247,16 +321,14 @@ export default async function handler(req, res) {
         return res.status(401).json({ success: false, error: errMsg });
     }
 
-    // Scenario B: Success Redirect (302)
     if (loginResponse.status === 302) {
         const redirectUrl = loginResponse.headers['location'];
         console.log('[API] 3. Login Successful. Redirecting to:', redirectUrl);
 
-        // Follow Redirect to JW
         const jwLoginResponse = await axios.get(redirectUrl, {
             headers: { 
-                'Cookie': sessionCookies,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                ...BROWSER_HEADERS,
+                'Cookie': sessionCookies
             },
             maxRedirects: 0,
             validateStatus: (status) => status >= 200 && status < 400
@@ -265,13 +337,14 @@ export default async function handler(req, res) {
         const jwCookies = getCookies(jwLoginResponse);
         if (jwCookies) sessionCookies += '; ' + jwCookies;
 
-        // Fetch Data
         console.log('[API] 4. Fetching Course Data...');
         const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
-            headers: { 'Cookie': sessionCookies }
+            headers: { 
+                ...BROWSER_HEADERS,
+                'Cookie': sessionCookies 
+            }
         });
 
-        // Parse IDs
         const pageHtml = tablePageResponse.data;
         const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
         const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
@@ -281,11 +354,10 @@ export default async function handler(req, res) {
             const bizId = bizTypeIdMatch[1];
             const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
             
-            const dataResponse = await axios.get(apiUrl, { headers: { 'Cookie': sessionCookies } });
+            const dataResponse = await axios.get(apiUrl, { headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies } });
             return res.json({ success: true, data: dataResponse.data });
         } 
         
-        // Embedded JSON Fallback
         const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
         if (activityMatch) {
             return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
