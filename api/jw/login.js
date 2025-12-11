@@ -114,18 +114,29 @@ export default async function handler(req, res) {
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
         // 2. Fallback: Robust Greedy Regex for Tokens
-        // Look for ANY string matching LT-xxxx-... anywhere in source
+        
+        // Regex for LT: LT- followed by alphanumeric, dashes, dots, underscores
         if (!lt) {
             const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
             if (ltMatch) lt = ltMatch[1];
         }
-        
-        // Look for ANY string matching e1s1, e1s2 anywhere (common execution format)
+
+        // Regex for Execution
         if (!execution) {
-             const execMatch = html.match(/['"](e[0-9]+s[0-9]+)['"]/);
-             if (execMatch) execution = execMatch[1];
+            // Pattern 1: input tag structure (name="execution" ... value="val" OR value="val" ... name="execution")
+            // This handles cases where cheerio might miss it due to malformed HTML
+            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']|value=["']([^"']+)["'][^>]*name=["']execution["']/i;
+            const inputMatch = html.match(inputRegex);
+            if (inputMatch) execution = inputMatch[1] || inputMatch[2];
         }
 
+        if (!execution) {
+             // Pattern 2: Look for typical eXsX pattern anywhere (e.g. e1s1)
+             // This is the most common CAS execution key format
+             const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
+             if (execMatch) execution = execMatch[1];
+        }
+        
         // 3. Early Captcha Check
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
         
@@ -143,14 +154,14 @@ export default async function handler(req, res) {
         // 4. Critical Token Validation (LT is now optional)
         if (!execution) {
              const title = $('title').text();
-             // Grab first 500 chars to debug what page we actually got
-             const snippet = html.substring(0, 500).replace(/</g, '&lt;');
+             // Grab snippet around "execution" if possible, or just head
+             const snippet = html.substring(0, 800).replace(/</g, '&lt;');
              console.error(`[API] Parsing Failed. Title: ${title}`);
              
              return res.status(500).json({ 
                  success: false, 
                  error: `CAS Page Parsing Failed. System might have changed.`,
-                 debugHtml: `Title: ${title}\nSnippet: ${snippet}`
+                 debugHtml: `Title: ${title}\n\nSnippet:\n${snippet}`
              });
         }
     }
@@ -206,7 +217,7 @@ export default async function handler(req, res) {
             // Greedy regex fallback for rotated tokens
             let finalExec = newExec;
             if (!finalExec || finalExec === execution) {
-                 const execMatch = html.match(/['"](e[0-9]+s[0-9]+)['"]/);
+                 const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
                  if (execMatch) finalExec = execMatch[1];
             }
 
