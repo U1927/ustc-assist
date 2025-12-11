@@ -1,38 +1,22 @@
 
-const express = require('express');
-const path = require('path');
-const axios = require('axios');
-const cheerio = require('cheerio');
-const bodyParser = require('body-parser');
-
-const app = express();
-const port = process.env.PORT || 3000;
-
-// Enable CORS manually to prevent 405/Cors issues if proxy fails
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'dist')));
-
-// --- USTC JW CRAWLER PROXY ---
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
 // Helper to parse cookies from Set-Cookie header
 const getCookies = (response) => {
   const setCookie = response.headers['set-cookie'];
   if (!setCookie) return '';
+  // Axios returns array for set-cookie
   return setCookie.map(c => c.split(';')[0]).join('; ');
 };
 
+// Helper: Check for Captcha in HTML and fetch it if present
 const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
+  if (typeof html !== 'string') return { found: false };
+
   const $ = cheerio.load(html);
+  
+  // 1. Detect Captcha Elements
   let captchaImg = $('#validateImg'); 
   let hasCaptcha = captchaImg.length > 0 || html.includes('validateCode') || html.includes('vcode');
 
@@ -40,12 +24,15 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
 
   if (hasCaptcha) {
     imgSrc = captchaImg.attr('src');
+    
+    // Fallback: Regex to find src if cheerio failed or dynamic
     if (!imgSrc) {
         const match = html.match(/src=["']([^"']*validateCode[^"']*)["']/i) || html.match(/src=["']([^"']*vcode[^"']*)["']/i);
         if (match) imgSrc = match[1];
     }
 
     if (imgSrc) {
+      // Resolve relative URL
       if (!imgSrc.startsWith('http')) {
          const origin = new URL(baseUrl).origin;
          if (imgSrc.startsWith('/')) {
@@ -55,6 +42,8 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
          }
       }
 
+      console.log('[API] Captcha detected. Fetching from:', imgSrc);
+      
       try {
         const imgRes = await axios.get(imgSrc, {
             responseType: 'arraybuffer',
@@ -70,7 +59,7 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
             image: `data:image/jpeg;base64,${base64}`
         };
       } catch (e) {
-        console.error("[Proxy] Failed to fetch captcha image:", e.message);
+        console.error("[API] Failed to fetch captcha image:", e.message);
       }
     }
   }
@@ -79,19 +68,23 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
 
 // Helper: Detect and follow manual redirects (Meta Refresh, JS, SSO Loading Pages)
 const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) => {
-    let html = initialHtml;
+    let html = typeof initialHtml === 'string' ? initialHtml : '';
     let currentUrl = initialUrl;
     let sessionCookies = cookies;
     let redirectCount = 0;
-    const MAX_REDIRECTS = 10; // Increased to handle complex SSO chains
+    const MAX_REDIRECTS = 10; 
 
     while (redirectCount < MAX_REDIRECTS) {
         let redirectUrl = null;
 
+        if (typeof html !== 'string') {
+             console.log('[API] HTML is not string, stopping redirect check.');
+             break;
+        }
+
         // 1. Check for specific USTC SSO / Loading Page markers
-        // The page usually has <div id="sso_redirect"> and a script at the bottom
         if (html.includes('id="sso_redirect"') || html.includes('id=\'sso_redirect\'')) {
-             console.log(`[Proxy] USTC SSO Loading Page detected (${redirectCount})`);
+             console.log(`[API] USTC SSO Loading Page detected (${redirectCount})`);
              // Extract URL from script
              // Look for simple location assignment: location.href = "..."
              let match = html.match(/(?:location\.href|window\.location)\s*=\s*['"]([^'"]+)['"]/);
@@ -100,10 +93,10 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
              if (match) {
                  redirectUrl = match[1];
              } else {
-                 // Fallback: look for the service URL inside the script text (often decoded or just plain string)
-                 // e.g. https://jw.ustc.edu.cn/ucas-sso/login
-                 const urlInScript = html.match(/['"](https?:\/\/[^'"]+)['"]/);
-                 if (urlInScript) redirectUrl = urlInScript[1];
+                 // Fallback: look for the service URL specifically (safer than generic https match)
+                 // Matches https://jw.ustc.edu.cn/ucas-sso/login or similar service URLs
+                 const serviceMatch = html.match(/['"](https?:\/\/[^'"]+(?:login|service|sso)[^'"]*)['"]/i);
+                 if (serviceMatch) redirectUrl = serviceMatch[1];
              }
         }
 
@@ -112,7 +105,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
             const metaMatch = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
             if (metaMatch) {
                 redirectUrl = metaMatch[1];
-                console.log(`[Proxy] Meta Refresh detected.`);
+                console.log(`[API] Meta Refresh detected.`);
             }
         }
 
@@ -148,20 +141,21 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         if (redirectUrl === currentUrl) break;
 
         try {
-            console.log(`[Proxy] Following redirect (${redirectCount + 1}): ${redirectUrl}`);
+            console.log(`[API] Following redirect (${redirectCount + 1}): ${redirectUrl}`);
             const res = await axios.get(redirectUrl, { 
                 headers: { ...headers, 'Cookie': sessionCookies },
-                validateStatus: status => status < 400 
+                validateStatus: status => status < 400,
+                responseType: 'text' // CRITICAL: Prevent axios from parsing JSON, keep it string
             });
             
             const newCookies = getCookies(res);
             if (newCookies) sessionCookies += '; ' + newCookies;
             
-            html = res.data;
+            html = res.data; // Now guaranteed to be string (or empty)
             currentUrl = redirectUrl;
             redirectCount++;
         } catch (e) {
-            console.error('[Proxy] Redirect fetch failed:', e.message);
+            console.error('[API] Redirect fetch failed:', e.message);
             break;
         }
     }
@@ -169,8 +163,16 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
     return { html, currentUrl, sessionCookies };
 };
 
-// Real login implementation
-app.post('/api/jw/login', async (req, res) => {
+export default async function handler(req, res) {
+  // 1. Set CORS Headers
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method Not Allowed' });
+
   const { username, password, captchaCode, context } = req.body;
 
   if (!username || !password) {
@@ -198,19 +200,28 @@ app.post('/api/jw/login', async (req, res) => {
   let eventId = 'submit';
 
   try {
+    // --- STEP 1: PREPARE LOGIN CONTEXT ---
+    
     if (context && context.sessionCookies && context.execution) {
+        // A. Resume from previous attempt
+        console.log('[API] Resuming session with provided context.');
         sessionCookies = context.sessionCookies;
-        lt = context.lt || '';
+        lt = context.lt || ''; 
         execution = context.execution;
         eventId = context.eventId || 'submit';
     } else {
-        console.log('[Proxy] 1. Fetching CAS login page...');
-        let loginPage = await axios.get(CAS_LOGIN_URL, { headers: BROWSER_HEADERS });
+        // B. New Session: Fetch Login Page
+        console.log('[API] 1. Fetching CAS login page (New Session)...');
+        let loginPage = await axios.get(CAS_LOGIN_URL, { 
+            headers: BROWSER_HEADERS,
+            responseType: 'text' // Force text to avoid object crash
+        });
         
         sessionCookies = getCookies(loginPage);
         let html = loginPage.data;
         let currentUrl = CAS_LOGIN_URL;
 
+        // --- HANDLE PAGE REDIRECTS (WAF/SPA/Meta Refresh) ---
         const redirectResult = await followPageRedirects(html, currentUrl, sessionCookies, BROWSER_HEADERS);
         html = redirectResult.html;
         currentUrl = redirectResult.currentUrl;
@@ -218,11 +229,12 @@ app.post('/api/jw/login', async (req, res) => {
 
         const $ = cheerio.load(html);
 
+        // 1. Extract Tokens (Standard Selectors)
         lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
         execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
-        // Robust Greedy Regex for Tokens
+        // 2. Fallback: Robust Greedy Regex
         if (!lt) {
             const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
                                  html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
@@ -235,6 +247,7 @@ app.post('/api/jw/login', async (req, res) => {
         }
 
         if (!execution) {
+            // Find inputs with name="execution"
             const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
             const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
             const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
@@ -242,19 +255,22 @@ app.post('/api/jw/login', async (req, res) => {
         }
 
         if (!execution) {
+             // Look for JS variables often used in SPA logins
              const scriptMatch = html.match(/["']?execution["']?\s*[:=]\s*["']([^"']+)["']/i);
              if (scriptMatch) execution = scriptMatch[1];
         }
 
         if (!execution) {
+             // Desperate regex for e1s1 style tokens
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
         }
-
+        
+        // 3. Early Captcha Check
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, currentUrl);
         
         if (captchaCheck.found) {
-            console.log('[Proxy] Captcha required during initial load.');
+            console.log('[API] Captcha required during initial load.');
             return res.json({
                 success: false,
                 requireCaptcha: true,
@@ -264,25 +280,30 @@ app.post('/api/jw/login', async (req, res) => {
             });
         }
 
+        // 4. Critical Token Validation
         if (!execution) {
-             const title = $('title').text() || "No Title";
-             const snippet = html.substring(0, 2000).replace(/</g, '&lt;');
-             console.error(`[Proxy] Parsing Failed. Title: ${title}`);
+             const title = $('title').text() || "No Title Found";
+             const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid HTML Content";
+             console.error(`[API] Parsing Failed. Title: ${title}`);
+             
              return res.status(500).json({ 
                  success: false, 
-                 error: `CAS Page Parsing Failed. System might have changed.`,
-                 debugHtml: `Page Title: ${title}\n\nSnippet:\n${snippet}`
+                 error: `CAS Page Parsing Failed. The page might be blocked or changed.`,
+                 debugHtml: `Page Title: ${title}\n\nHTML Snippet (Top 2k chars):\n${snippet}`
              });
         }
     }
 
-    console.log('[Proxy] 2. Submitting credentials...');
+    // --- STEP 2: SUBMIT CREDENTIALS ---
+
+    console.log('[API] 2. Submitting credentials...');
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
     if (lt) params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
+    
     if (!params.has('button')) params.append('button', 'login'); 
     
     if (captchaCode) {
@@ -298,30 +319,33 @@ app.post('/api/jw/login', async (req, res) => {
         'Referer': CAS_LOGIN_URL
       },
       maxRedirects: 0, 
-      validateStatus: (status) => status >= 200 && status < 400
+      validateStatus: (status) => status >= 200 && status < 400,
+      responseType: 'text' // Force text
     });
 
     const newCookies = getCookies(loginResponse);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    // --- HANDLE RESPONSE ---
+    // --- STEP 3: HANDLE RESPONSE ---
 
     if (loginResponse.status === 200) {
         let html = loginResponse.data;
         
         // CHECK: Is this a success page masquerading as 200 (using JS Redirect)?
+        // If it contains #sso_redirect, it's actually successful and proceeding to next step
         const redirectCheck = await followPageRedirects(html, CAS_LOGIN_URL, sessionCookies, BROWSER_HEADERS);
         
         if (redirectCheck.currentUrl !== CAS_LOGIN_URL) {
-            console.log('[Proxy] Login returned 200 but contained redirect (Success). Proceeding.');
+            console.log('[API] Login returned 200 but contained redirect (Success). Proceeding.');
+            // Update state to point to where we landed (likely JW Middleware)
             html = redirectCheck.html;
             sessionCookies = redirectCheck.sessionCookies;
-            // Proceed to Step 4 logic
         } else {
-            // Real Failure
+            // It's a real 200 Failure (Error Page or Captcha Page)
             const $err = cheerio.load(html);
             let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
 
+            // Check if verification error
             const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
             
             if (captchaCheck.found) {
@@ -329,8 +353,8 @@ app.post('/api/jw/login', async (req, res) => {
                 const newExec = $err('input[name="execution"]').val() || execution;
                 let finalExec = newExec;
                 if (!finalExec || finalExec === execution) {
-                     const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
-                     if (execMatch) finalExec = execMatch[1];
+                    const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
+                    if (execMatch) finalExec = execMatch[1];
                 }
 
                 return res.json({
@@ -346,13 +370,14 @@ app.post('/api/jw/login', async (req, res) => {
                     }
                 });
             }
+
             return res.status(401).json({ success: false, error: errMsg });
         }
     }
 
     if (loginResponse.status === 302) {
         const redirectUrl = loginResponse.headers['location'];
-        console.log('[Proxy] 3. Login Successful. Redirecting to:', redirectUrl);
+        console.log('[API] 3. Login Successful (302). Redirecting to:', redirectUrl);
 
         const jwLoginResponse = await axios.get(redirectUrl, {
             headers: { 
@@ -360,7 +385,8 @@ app.post('/api/jw/login', async (req, res) => {
                 'Cookie': sessionCookies
             },
             maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
+            validateStatus: (status) => status >= 200 && status < 400,
+            responseType: 'text'
         });
         
         const jwCookies = getCookies(jwLoginResponse);
@@ -368,20 +394,26 @@ app.post('/api/jw/login', async (req, res) => {
     }
 
     // --- STEP 4: FETCH COURSE DATA ---
+    // Whether we came from 302 or 200-redirect, we assume we are logged in now.
     
-    console.log('[Proxy] 4. Fetching Course Data...');
+    console.log('[API] 4. Fetching Course Data...');
     const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
         headers: { 
             ...BROWSER_HEADERS,
             'Cookie': sessionCookies 
-        }
+        },
+        responseType: 'text' // Force text
     });
-
+    
+    // --- STEP 4.1: Handle JW Redirects (Loading screens, #sso_redirect, etc) ---
+    // This is the critical part that was failing before
     let pageHtml = tablePageResponse.data;
     const jwRedirectResult = await followPageRedirects(pageHtml, 'https://jw.ustc.edu.cn/for-std/course-table', sessionCookies, BROWSER_HEADERS);
     pageHtml = jwRedirectResult.html;
     sessionCookies = jwRedirectResult.sessionCookies;
 
+    // --- STEP 4.2: Parse Data ---
+    // Strategy A: Find StudentID and call API
     const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
     const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
 
@@ -390,21 +422,27 @@ app.post('/api/jw/login', async (req, res) => {
         const bizId = bizTypeIdMatch[1];
         const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
         
-        console.log(`[Proxy] Found StudentID: ${stdId}. Fetching JSON...`);
+        console.log(`[API] Found StudentID: ${stdId}. Fetching JSON...`);
         const dataResponse = await axios.get(apiUrl, { headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies } });
         return res.json({ success: true, data: dataResponse.data });
     } 
     
+    // Strategy B: Find embedded JSON in script tags
     const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s) || 
-                          pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
-                          pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
+                            pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
+                            pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
+
     if (activityMatch) {
-        return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
+            console.log('[API] Found course data in script variable.');
+            return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
     }
 
+    // --- FAILURE DEBUGGING ---
     const $jw = cheerio.load(pageHtml);
     const title = $jw('title').text() || "No Title";
-    const snippet = pageHtml.substring(0, 2000).replace(/</g, '&lt;');
+    const snippet = (pageHtml && typeof pageHtml === 'string') ? pageHtml.substring(0, 2000).replace(/</g, '&lt;') : "Invalid Content";
+    
+    console.error(`[API] JW Parsing Failed. Title: ${title}`);
 
     return res.status(500).json({ 
         success: false, 
@@ -413,17 +451,7 @@ app.post('/api/jw/login', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('[Proxy] Error:', error.message);
+    console.error('[API] Error:', error.message);
     return res.status(500).json({ success: false, error: `System Error: ${error.message}` });
   }
-});
-
-
-// Handle SPA routing
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
-
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
+}
