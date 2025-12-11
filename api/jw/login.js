@@ -70,7 +70,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
     let currentUrl = initialUrl;
     let sessionCookies = cookies;
     let redirectCount = 0;
-    const MAX_REDIRECTS = 3;
+    const MAX_REDIRECTS = 5; // Increased depth for safety
 
     while (redirectCount < MAX_REDIRECTS) {
         let redirectUrl = null;
@@ -79,7 +79,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         const metaMatch = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
         if (metaMatch) {
             redirectUrl = metaMatch[1];
-            console.log('[API] Meta Refresh detected:', redirectUrl);
+            console.log(`[API] Meta Refresh detected (${redirectCount}):`, redirectUrl);
         }
 
         // 2. Check JS Redirect
@@ -92,10 +92,10 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
             if (jsAssignment) {
                 redirectUrl = jsAssignment[1];
-                console.log('[API] JS Assignment Redirect detected:', redirectUrl);
+                console.log(`[API] JS Assignment Redirect detected (${redirectCount}):`, redirectUrl);
             } else if (jsReplace) {
                 redirectUrl = jsReplace[1];
-                console.log('[API] JS Replace Redirect detected:', redirectUrl);
+                console.log(`[API] JS Replace Redirect detected (${redirectCount}):`, redirectUrl);
             }
         }
 
@@ -185,7 +185,6 @@ export default async function handler(req, res) {
         let currentUrl = CAS_LOGIN_URL;
 
         // --- HANDLE PAGE REDIRECTS (WAF/SPA/Meta Refresh) ---
-        // Enhanced logic to follow sso_redirect or meta refresh pages
         const redirectResult = await followPageRedirects(html, currentUrl, sessionCookies, BROWSER_HEADERS);
         html = redirectResult.html;
         currentUrl = redirectResult.currentUrl;
@@ -344,8 +343,14 @@ export default async function handler(req, res) {
                 'Cookie': sessionCookies 
             }
         });
+        
+        // --- STEP 4.1: Handle JW Redirects (Loading screens, etc) ---
+        let pageHtml = tablePageResponse.data;
+        const jwRedirectResult = await followPageRedirects(pageHtml, 'https://jw.ustc.edu.cn/for-std/course-table', sessionCookies, BROWSER_HEADERS);
+        pageHtml = jwRedirectResult.html;
+        sessionCookies = jwRedirectResult.sessionCookies;
 
-        const pageHtml = tablePageResponse.data;
+        // --- STEP 4.2: Parse Data ---
         const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
         const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
 
@@ -354,16 +359,29 @@ export default async function handler(req, res) {
             const bizId = bizTypeIdMatch[1];
             const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
             
+            console.log(`[API] Found StudentID: ${stdId}. Fetching JSON...`);
             const dataResponse = await axios.get(apiUrl, { headers: { ...BROWSER_HEADERS, 'Cookie': sessionCookies } });
             return res.json({ success: true, data: dataResponse.data });
         } 
         
         const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
         if (activityMatch) {
-            return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
+             console.log('[API] Found activities variable directly.');
+             return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
         }
 
-        return res.status(500).json({ success: false, error: 'Login successful, but failed to extract schedule data from JW page.' });
+        // --- FAILURE DEBUGGING ---
+        const $jw = cheerio.load(pageHtml);
+        const title = $jw('title').text() || "No Title";
+        const snippet = pageHtml.substring(0, 2000).replace(/</g, '&lt;');
+        
+        console.error(`[API] JW Parsing Failed. Title: ${title}`);
+
+        return res.status(500).json({ 
+            success: false, 
+            error: 'Login successful, but failed to extract schedule data from JW page.',
+            debugHtml: `JW Page Title: ${title}\n\nSnippet:\n${snippet}`
+        });
     }
 
     return res.status(500).json({ success: false, error: `Unexpected Status: ${loginResponse.status}` });
