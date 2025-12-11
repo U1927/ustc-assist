@@ -11,35 +11,34 @@ import { format } from 'date-fns';
 interface JwLesson {
   id?: string;
   courseName?: string;
-  nameZh?: string; // Some APIs use this
-  course?: { nameZh: string }; // Nested structure
+  nameZh?: string;
+  course?: { nameZh: string };
   classroom?: { name: string };
   teacherAssignmentList?: Array<{ teacher?: { name?: string }, name?: string }>;
   teachers?: Array<{ name: string }>;
-  scheduleGroupStr?: string; // Text description
-  weeks?: number[]; // [1, 2, 3...]
-  weekIndex?: number; // 1 (Mon) - 7 (Sun)
+  weeks?: number[];
+  weekIndex?: number;
   weekday?: number;
   startUnit?: number;
   endUnit?: number;
-  credits?: number;
 }
 
-export const parseJwJson = (jsonString: string, semesterStart: string): ScheduleItem[] => {
+export const parseJwJson = (input: string | any, semesterStart: string): ScheduleItem[] => {
   try {
-    // 1. Clean and Parse JSON
-    const cleanStr = jsonString.trim();
     let data: any;
-    
-    try {
-      data = JSON.parse(cleanStr);
-    } catch (e) {
-      console.error("JSON Parse Error:", e);
-      throw new Error("Invalid JSON format. Please copy the raw response array or object.");
+
+    // Handle both string input (from manual paste) and object input (from API)
+    if (typeof input === 'string') {
+        try {
+            data = JSON.parse(input.trim());
+        } catch (e) {
+            throw new Error("Invalid JSON format. Please check your input.");
+        }
+    } else {
+        data = input;
     }
 
-    // 2. Locate the Lessons Array
-    // USTC JSON structure varies. Could be root array, or inside { studentTableVm: { activities: [...] } }
+    // Locate the Lessons Array
     let lessons: JwLesson[] = [];
 
     if (Array.isArray(data)) {
@@ -53,12 +52,11 @@ export const parseJwJson = (jsonString: string, semesterStart: string): Schedule
     } else if (data.activities && Array.isArray(data.activities)) {
       lessons = data.activities;
     } else {
-      throw new Error("Could not find course list in JSON. Ensure you copied the correct 'get-data' response.");
+      throw new Error("Could not find course list in data structure.");
     }
 
     const scheduleItems: ScheduleItem[] = [];
 
-    // 3. Iterate and Convert
     lessons.forEach((lesson) => {
       // A. Extract Basic Info
       const title = lesson.courseName || lesson.nameZh || lesson.course?.nameZh || "Unknown Course";
@@ -74,22 +72,15 @@ export const parseJwJson = (jsonString: string, semesterStart: string): Schedule
       }
 
       // B. Extract Time Info
-      // Weeks: Array of week indices (e.g. [1,2,3...18])
       const weeks = lesson.weeks || [];
-      // Weekday: 1-7
       const weekday = lesson.weekday || lesson.weekIndex || 1;
-      // Units: e.g. Start 3, End 5
       const startUnit = lesson.startUnit;
       const endUnit = lesson.endUnit;
 
-      if (weeks.length === 0 || !startUnit || !endUnit) {
-        // Skip invalid entries or text-only entries without parsed time
-        return;
-      }
+      if (weeks.length === 0 || !startUnit || !endUnit) return;
 
-      // C. Generate Events for each Week
+      // C. Generate Events
       weeks.forEach((week) => {
-        // Validate Time Slots
         const startTimeConfig = USTC_TIME_SLOTS[startUnit];
         const endTimeConfig = USTC_TIME_SLOTS[endUnit];
 
@@ -102,7 +93,7 @@ export const parseJwJson = (jsonString: string, semesterStart: string): Schedule
           id: crypto.randomUUID(),
           title: title,
           location: location,
-          type: 'course', // Default to course
+          type: 'course',
           startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
           endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
           description: teachers ? `Instructor: ${teachers}` : undefined,
