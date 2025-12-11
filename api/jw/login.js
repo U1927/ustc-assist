@@ -101,23 +101,34 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
                  const scripts = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
                  if (scripts) {
                      for (const script of scripts) {
-                         // Find all strings that look like URLs
-                         const possibleUrls = script.match(/['"]((?:https?:\/\/|\/)[^'"]+)['"]/g);
-                         if (possibleUrls) {
-                             for (const rawMatch of possibleUrls) {
-                                 const url = rawMatch.slice(1, -1); // remove quotes
-                                 // Simple heuristic to identify login redirect URLs vs assets
-                                 if (
-                                     (url.includes('login') || url.includes('service') || url.includes('sso') || url.includes('ucas')) && 
-                                     !url.includes('.css') && 
-                                     !url.includes('.png') && 
-                                     !url.includes('.jpg') && 
-                                     !url.includes('.gif') &&
-                                     !url.includes('jquery') &&
-                                     !url.includes('vue')
-                                 ) {
-                                     match = [null, url]; // Mimic regex match structure
+                         // Find all strings that look like URLs (http or /)
+                         // Regex: quote, (http/s or /), anything not quote, quote
+                         const urlMatches = [...script.matchAll(/(["'])((?:https?:\/\/|\/)[^\1]+?)\1/g)];
+                         
+                         for (const m of urlMatches) {
+                             const url = m[2];
+                             
+                             // Filter out obvious assets to find the likely redirect URL
+                             if (
+                                 !url.includes('.css') && 
+                                 !url.includes('.png') && 
+                                 !url.includes('.jpg') && 
+                                 !url.includes('.gif') &&
+                                 !url.includes('.ico') &&
+                                 !url.includes('.js') && // usually we don't redirect to a .js file
+                                 !url.includes('jquery') &&
+                                 !url.includes('vue') &&
+                                 !url.includes('axios')
+                             ) {
+                                 // Prefer URLs with keywords
+                                 if (url.includes('login') || url.includes('service') || url.includes('sso') || url.includes('ucas')) {
+                                     match = [null, url]; 
                                      break;
+                                 }
+                                 // If it's a very short relative path, might be it
+                                 if (url.startsWith('/') && url.length < 50) {
+                                     // Store as candidate, but keep looking for better one
+                                     if (!match) match = [null, url];
                                  }
                              }
                          }
