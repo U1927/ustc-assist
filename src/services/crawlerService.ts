@@ -47,7 +47,12 @@ export const autoImportFromJw = async (
     }
 
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Login failed');
+      let errorMsg = result.error || 'Login failed';
+      // Append Debug HTML using the special separator if available
+      if (result.debugHtml) {
+          errorMsg += `DebugHtml:${result.debugHtml}`;
+      }
+      throw new Error(errorMsg);
     }
 
     // result.data contains the JW JSON
