@@ -108,12 +108,17 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
         // 2. Standard JS assignments
         if (!redirectUrl) {
+            // Explicit location.href with loose matching for the SSO page
+            // This captures: window.location.href = "login?service=..."
+            const ssoRedirectMatch = html.match(/(?:location\.href|location\.replace|location\.assign)\s*[=(]\s*['"`]([^'"`]+)['"`]/i);
+
             const jsAssignment = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
             const jsAssignmentTemplate = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*`([^`]+)`/); // ES6 Backticks
             const jsCall = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
             const jsCallTemplate = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*`([^`]+)`\s*\)/);
             
-            if (jsAssignment) redirectUrl = jsAssignment[1];
+            if (ssoRedirectMatch) redirectUrl = ssoRedirectMatch[1];
+            else if (jsAssignment) redirectUrl = jsAssignment[1];
             else if (jsAssignmentTemplate) redirectUrl = jsAssignmentTemplate[1];
             else if (jsCall) redirectUrl = jsCall[1];
             else if (jsCallTemplate) redirectUrl = jsCallTemplate[1];
