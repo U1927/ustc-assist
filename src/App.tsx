@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
 import Sidebar from './components/Sidebar';
@@ -52,26 +52,40 @@ const App: React.FC = () => {
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
-      loadCloudData(savedUser.studentId);
     }
   }, []);
 
-  const loadCloudData = async (studentId: string) => {
-    setSyncStatus('syncing');
-    console.log(`[App] Loading cloud data for ${studentId}...`);
-    const data = await Storage.fetchUserData(studentId);
-    if (data) {
-      console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
-      setEvents(data.schedule);
-      setTodos(data.todos);
-      setIsDataLoaded(true); 
-      setSyncStatus('idle');
-    } else {
-      console.warn("[App] Failed to load data. Starting with empty state.");
-      setIsDataLoaded(true); 
-      setSyncStatus('error');
+  // Separate effect for loading cloud data to handle mounting state correctly
+  useEffect(() => {
+    let isMounted = true;
+
+    if (user && user.isLoggedIn) {
+      const fetchCloud = async () => {
+        setSyncStatus('syncing');
+        console.log(`[App] Loading cloud data for ${user.studentId}...`);
+        
+        const data = await Storage.fetchUserData(user.studentId);
+        
+        if (isMounted) {
+          if (data) {
+            console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
+            setEvents(data.schedule);
+            setTodos(data.todos);
+            setIsDataLoaded(true); 
+            setSyncStatus('idle');
+          } else {
+            console.warn("[App] Failed to load data. Starting with empty state.");
+            setIsDataLoaded(true); 
+            setSyncStatus('error');
+          }
+        }
+      };
+      
+      fetchCloud();
     }
-  };
+
+    return () => { isMounted = false; };
+  }, [user?.studentId]); // Only re-run if student ID changes
 
   // 2. Auto-Save Logic
   useEffect(() => {
@@ -161,7 +175,7 @@ const App: React.FC = () => {
   const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
-    loadCloudData(loggedInUser.studentId);
+    // Cloud load is triggered by useEffect when user changes
   };
 
   const handleLogout = () => {
