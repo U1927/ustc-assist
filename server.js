@@ -115,14 +115,22 @@ app.post('/api/jw/login', async (req, res) => {
 
         // 2. Fallback: Robust Greedy Regex for Tokens
         if (!lt) {
-            const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
-            if (ltMatch) lt = ltMatch[1];
+            const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
+                                 html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
+            if (ltInputMatch) {
+                lt = ltInputMatch[1] || ltInputMatch[2];
+            } else {
+                const ltFormatMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
+                if (ltFormatMatch) lt = ltFormatMatch[1];
+            }
         }
 
         if (!execution) {
-            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']|value=["']([^"']+)["'][^>]*name=["']execution["']/i;
-            const inputMatch = html.match(inputRegex);
-            if (inputMatch) execution = inputMatch[1] || inputMatch[2];
+            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
+            const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
+            
+            const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
+            if (inputMatch) execution = inputMatch[1];
         }
 
         if (!execution) {
@@ -144,13 +152,13 @@ app.post('/api/jw/login', async (req, res) => {
         }
 
         if (!execution) {
-             const title = $('title').text();
-             const snippet = html.substring(0, 800).replace(/</g, '&lt;');
+             const title = $('title').text() || "No Title";
+             const snippet = html.substring(0, 1000).replace(/</g, '&lt;');
              console.error(`[Proxy] Parsing Failed. Title: ${title}`);
              return res.status(500).json({ 
                  success: false, 
                  error: `CAS Page Parsing Failed. System might have changed.`,
-                 debugHtml: `Title: ${title}\n\nSnippet:\n${snippet}`
+                 debugHtml: `Page Title: ${title}\n\nSnippet:\n${snippet}`
              });
         }
     }
