@@ -66,6 +66,12 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
   return { found: false };
 };
 
+// Helper to decode HTML entities like &amp; to &
+const decodeEntities = (str) => {
+  if (!str) return str;
+  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+};
+
 // Helper: Detect and follow manual redirects (Meta Refresh, JS, SSO Loading Pages)
 const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) => {
     let html = typeof initialHtml === 'string' ? initialHtml : '';
@@ -107,40 +113,42 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         if (!redirectUrl && isSsoPage) {
              console.log(`[API] SSO/Loading Page detected (${redirectCount}). Engaging Nuclear URL Extraction.`);
              
-             // Find ALL quoted strings that look like URLs (single, double, or backticks)
+             // Strategy A: Find quoted strings (previous logic)
              const urlPattern = /(['"`])((?:https?:\/\/|\/)[^\1]+?)\1/g;
              const candidates = [];
              let match;
 
              while ((match = urlPattern.exec(html)) !== null) {
                  const url = match[2];
-                 // Filter out typical assets and libraries to avoid false positives
-                 if (
-                     !url.match(/\.(css|png|jpg|jpeg|gif|ico|svg|js|woff2?|ttf|eot)$/i) &&
-                     !url.includes('jquery') &&
-                     !url.includes('axios') &&
-                     !url.includes('vue') &&
-                     !url.includes('react') &&
-                     !url.includes('node_modules') &&
-                     url.trim().length > 1
-                 ) {
-                     candidates.push(url);
-                 }
+                 if (isValidCandidate(url)) candidates.push(url);
              }
 
-             // Priority A: URLs containing login/service keywords
+             // Strategy B: Find raw unquoted http/https strings
+             const rawHttpPattern = /(https?:\/\/[a-zA-Z0-9\-\._~:\/?#\[\]@!$&'()*+,;=]+)/g;
+             while ((match = rawHttpPattern.exec(html)) !== null) {
+                 const url = match[1];
+                 // Often ends with a quote or bracket if captured greedily
+                 const cleanUrl = url.split(/["';\s]/)[0]; 
+                 if (isValidCandidate(cleanUrl)) candidates.push(cleanUrl);
+             }
+
+             // Selection Logic
+             // Priority 1: URLs containing login/service/passport/sso
              const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso'));
              
              if (best) {
                  redirectUrl = best;
              } else if (candidates.length > 0) {
-                 // Priority B: The first viable candidate that looks like a path or http
-                 const viable = candidates.find(u => u.length > 5 && (u.startsWith('http') || u.startsWith('/')));
+                 // Priority 2: The first viable candidate that looks like a path or http
+                 const viable = candidates.find(u => u.length > 8 && (u.startsWith('http') || u.startsWith('/')));
                  if (viable) redirectUrl = viable;
              }
         }
 
         if (!redirectUrl) break; // No redirect found
+
+        // Decode HTML entities (important for &amp; in URLs)
+        redirectUrl = decodeEntities(redirectUrl);
 
         // Resolve Relative URL
         if (!redirectUrl.startsWith('http')) {
@@ -181,6 +189,18 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
     return { html, currentUrl, sessionCookies };
 };
+
+// Internal Helper for candidate filtering
+function isValidCandidate(url) {
+    return !url.match(/\.(css|png|jpg|jpeg|gif|ico|svg|js|woff2?|ttf|eot)$/i) &&
+           !url.includes('jquery') &&
+           !url.includes('axios') &&
+           !url.includes('vue') &&
+           !url.includes('react') &&
+           !url.includes('node_modules') &&
+           !url.includes('w3.org') &&
+           url.trim().length > 1;
+}
 
 export default async function handler(req, res) {
   // 1. Set CORS Headers
