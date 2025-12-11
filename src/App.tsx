@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
@@ -33,9 +32,6 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  // Mounted Ref to prevent state updates on unmounted components (Fixes NotFoundError)
-  const isMountedRef = useRef(true);
-
   // Single Event Form
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'activity', startTime: '', endTime: '' });
 
@@ -56,24 +52,21 @@ const App: React.FC = () => {
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
     }
-    
-    // Cleanup for unmount
-    return () => { isMountedRef.current = false; };
   }, []);
 
-  // Separate effect for loading cloud data to handle mounting state correctly
+  // Separate effect for loading cloud data
   useEffect(() => {
-    isMountedRef.current = true;
+    let isActive = true; // Local flag to track THIS specific effect execution
 
     if (user && user.isLoggedIn) {
       const fetchCloud = async () => {
-        if (!isMountedRef.current) return;
+        if (!isActive) return;
         setSyncStatus('syncing');
         console.log(`[App] Loading cloud data for ${user.studentId}...`);
         
         const data = await Storage.fetchUserData(user.studentId);
         
-        if (isMountedRef.current) {
+        if (isActive) {
           if (data) {
             console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
             setEvents(data.schedule);
@@ -90,21 +83,27 @@ const App: React.FC = () => {
       
       fetchCloud();
     }
-  }, [user?.studentId]); // Only re-run if student ID changes
+
+    return () => {
+      isActive = false; // Cancel updates if component unmounts or user changes
+    };
+  }, [user?.studentId]);
 
   // 2. Auto-Save Logic
   useEffect(() => {
     if (!user || !isDataLoaded) return;
 
+    let isActive = true;
     const timeoutId = setTimeout(async () => {
-      if (!isMountedRef.current) return;
+      if (!isActive) return;
       setSyncStatus('syncing');
+      
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
-      if (isMountedRef.current) {
+      if (isActive) {
           if (result.success) {
             setSyncStatus('saved');
-            setTimeout(() => { if(isMountedRef.current) setSyncStatus('idle'); }, 2000);
+            setTimeout(() => { if(isActive) setSyncStatus('idle'); }, 2000);
           } else {
             setSyncStatus('error');
           }
@@ -112,7 +111,11 @@ const App: React.FC = () => {
     }, 500);
 
     setConflicts(Utils.getConflicts(events));
-    return () => clearTimeout(timeoutId);
+    
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+    };
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session
@@ -183,7 +186,6 @@ const App: React.FC = () => {
   const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
-    // Cloud load is triggered by useEffect when user changes
   };
 
   const handleLogout = () => {
