@@ -89,11 +89,11 @@ export default async function handler(req, res) {
   try {
     // --- STEP 1: PREPARE LOGIN CONTEXT ---
     
-    if (context && context.sessionCookies && context.lt && context.execution) {
+    if (context && context.sessionCookies && context.execution) {
         // A. Resume from previous attempt (User submitted captcha)
         console.log('[API] Resuming session with provided context.');
         sessionCookies = context.sessionCookies;
-        lt = context.lt;
+        lt = context.lt || ''; // LT might be empty
         execution = context.execution;
         eventId = context.eventId || 'submit';
     } else {
@@ -113,18 +113,20 @@ export default async function handler(req, res) {
         execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
         eventId = $('input[name="_eventId"]').val() || 'submit';
 
-        // 2. Fallback: Robust Regex for Tokens
+        // 2. Fallback: Robust Greedy Regex for Tokens
+        // Look for ANY string matching LT-xxxx-... anywhere in source
         if (!lt) {
-            // Match value="LT-..." or value='LT-...' or just LT-... inside input
-            const ltMatch = html.match(/value=["']?(LT-[a-zA-Z0-9\-\._]+)["']?/i); 
+            const ltMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
             if (ltMatch) lt = ltMatch[1];
         }
+        
+        // Look for ANY string matching e1s1, e1s2 anywhere (common execution format)
         if (!execution) {
-             const execMatch = html.match(/name=["']execution["'][^>]*value=["']?([eE][a-zA-Z0-9]+[sS][a-zA-Z0-9]+)["']?/i) || html.match(/value=["']?([eE][a-zA-Z0-9]+[sS][a-zA-Z0-9]+)["']?/i);
+             const execMatch = html.match(/['"](e[0-9]+s[0-9]+)['"]/);
              if (execMatch) execution = execMatch[1];
         }
 
-        // 3. Early Captcha Check (Even if tokens are missing)
+        // 3. Early Captcha Check
         const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
         
         if (captchaCheck.found) {
@@ -134,22 +136,21 @@ export default async function handler(req, res) {
                 requireCaptcha: true,
                 captchaImage: captchaCheck.image,
                 message: "Security check required. Please enter code.",
-                // Return whatever tokens we found, or empty strings.
-                // If tokens are missing, the next request might fail, but at least user sees captcha.
                 context: { sessionCookies, lt: lt || '', execution: execution || '', eventId }
             });
         }
 
-        // 4. Critical Token Validation
-        if (!lt || !execution) {
+        // 4. Critical Token Validation (LT is now optional)
+        if (!execution) {
              const title = $('title').text();
-             const snippet = html.substring(0, 1000).replace(/</g, '&lt;'); // Escape for safety
+             // Grab first 500 chars to debug what page we actually got
+             const snippet = html.substring(0, 500).replace(/</g, '&lt;');
              console.error(`[API] Parsing Failed. Title: ${title}`);
              
              return res.status(500).json({ 
                  success: false, 
-                 error: `CAS Parsing Failed. Page Title: "${title}". System might have changed.`,
-                 debugHtml: snippet
+                 error: `CAS Page Parsing Failed. System might have changed.`,
+                 debugHtml: `Title: ${title}\nSnippet: ${snippet}`
              });
         }
     }
@@ -160,10 +161,13 @@ export default async function handler(req, res) {
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    params.append('lt', lt);
+    // Only append LT if found (CAS 5+ sometimes drops LT)
+    if (lt) params.append('lt', lt);
     params.append('execution', execution);
     params.append('_eventId', eventId);
-    if (!params.has('button')) params.append('button', 'login'); // Sometimes 'login' is needed
+    
+    // Some CAS forms use 'submit' or 'login' for the button name
+    if (!params.has('button')) params.append('button', 'login'); 
     
     // Add Captcha if provided
     if (captchaCode) {
@@ -199,6 +203,13 @@ export default async function handler(req, res) {
             const newLt = $err('input[name="lt"]').val() || lt;
             const newExec = $err('input[name="execution"]').val() || execution;
 
+            // Greedy regex fallback for rotated tokens
+            let finalExec = newExec;
+            if (!finalExec || finalExec === execution) {
+                 const execMatch = html.match(/['"](e[0-9]+s[0-9]+)['"]/);
+                 if (execMatch) finalExec = execMatch[1];
+            }
+
             return res.json({
                 success: false,
                 requireCaptcha: true,
@@ -207,7 +218,7 @@ export default async function handler(req, res) {
                 context: { 
                     sessionCookies, 
                     lt: newLt, 
-                    execution: newExec, 
+                    execution: finalExec || execution, 
                     eventId 
                 }
             });
