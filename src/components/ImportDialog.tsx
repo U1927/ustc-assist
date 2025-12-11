@@ -1,7 +1,6 @@
 
-import React, { useState } from 'react';
-import { X, FileJson, Check, AlertCircle, HelpCircle, Loader2, Globe, RefreshCw, Terminal } from 'lucide-react';
-import { autoImportFromJw } from '../services/crawlerService';
+import React, { useState, useEffect } from 'react';
+import { X, FileJson, Check, Terminal, ExternalLink, Copy, PlayCircle, AlertCircle } from 'lucide-react';
 
 interface ImportDialogProps {
   isOpen: boolean;
@@ -10,241 +9,227 @@ interface ImportDialogProps {
 }
 
 const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }) => {
-  const [activeTab, setActiveTab] = useState<'manual' | 'auto'>('auto');
+  const [activeTab, setActiveTab] = useState<'script' | 'manual'>('script');
   const [jsonInput, setJsonInput] = useState('');
+  const [status, setStatus] = useState<'idle' | 'waiting' | 'success'>('idle');
+
+  // --- SCRIPT METHOD LOGIC ---
   
-  // Auto Import State
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  
-  // Captcha State
-  const [captchaRequired, setCaptchaRequired] = useState(false);
-  const [captchaImage, setCaptchaImage] = useState('');
-  const [captchaCode, setCaptchaCode] = useState('');
-  const [loginContext, setLoginContext] = useState<any>(null);
-  
-  const [error, setError] = useState('');
+  // The script we want the user to run
+  const CRAWLER_SCRIPT = `
+(async () => {
+  try {
+    console.log("USTC Assistant: 开始抓取...");
+    const html = document.body.innerHTML;
+    
+    // 1. Find Student ID
+    const idMatch = html.match(/studentId[:\\s"']+(\\d+)/);
+    const bizMatch = html.match(/bizTypeId[:\\s"']+(\\d+)/);
+    
+    if(!idMatch) {
+        alert("❌ 无法找到学号信息。\\n请确保您已经登录，并且处于【学生课表查询】页面。");
+        return;
+    }
+    
+    const stdId = idMatch[1];
+    const bizId = bizMatch ? bizMatch[1] : 2;
+    console.log("Found ID:", stdId);
+
+    // 2. Fetch Data using User's Session
+    const url = \`https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=\${bizId}&studentId=\${stdId}\`;
+    const res = await fetch(url);
+    const json = await res.json();
+    
+    // 3. Send back to App
+    if (window.opener) {
+        window.opener.postMessage({ type: 'USTC_DATA_IMPORT', payload: json }, '*');
+        alert("✅ 课表数据已发送至 USTC Assistant！\\n您可以关闭此窗口了。");
+    } else {
+        // Fallback: Copy to clipboard
+        const str = JSON.stringify(json);
+        const input = document.createElement('textarea');
+        input.value = str;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+        alert("✅ 无法自动传回数据，但已复制到剪贴板！\\n请返回应用并手动粘贴。");
+    }
+  } catch (e) {
+    alert("❌ 抓取失败: " + e.message);
+  }
+})();
+`.trim();
+
+  // Listen for the postMessage from the opened window
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'USTC_DATA_IMPORT') {
+        console.log("[Import] Received data via postMessage");
+        onImport(JSON.stringify(event.data.payload));
+        setStatus('success');
+        // Optional: Close dialog automatically?
+        // onClose();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onImport]);
+
+  const handleCopyScript = () => {
+    navigator.clipboard.writeText(CRAWLER_SCRIPT);
+    alert("脚本已复制！请在教务系统控制台粘贴。");
+  };
+
+  const handleOpenJw = () => {
+    window.open('https://jw.ustc.edu.cn/for-std/course-table', 'ustc_jw_window');
+    setStatus('waiting');
+  };
+
+  // --- MANUAL METHOD LOGIC ---
+  const handleManualImport = () => {
+    if (!jsonInput.trim()) return;
+    onImport(jsonInput);
+    setJsonInput('');
+    setStatus('success');
+  };
 
   if (!isOpen) return null;
 
-  const handleManualImport = () => {
-    if (!jsonInput.trim()) {
-      setError("Please paste the JSON content.");
-      return;
-    }
-    setError('');
-    onImport(jsonInput);
-    setJsonInput('');
-  };
-
-  const handleAutoImport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!username || !password) {
-      setError("Please enter Username and Password");
-      return;
-    }
-    if (captchaRequired && !captchaCode) {
-        setError("Please enter the verification code");
-        return;
-    }
-
-    setIsLoading(true);
-    setError('');
-
-    try {
-      // Pass captcha and context if we are in phase 2
-      const response = await autoImportFromJw(
-          username, 
-          password, 
-          captchaRequired ? captchaCode : undefined,
-          loginContext
-      );
-
-      // Check if server asks for Captcha (or asks AGAIN)
-      if (response.requireCaptcha) {
-          setCaptchaRequired(true);
-          setCaptchaImage(response.captchaImage);
-          setLoginContext(response.context);
-          setCaptchaCode(''); // Clear previous code
-          setError(response.message || "Please enter the code shown below.");
-          setIsLoading(false);
-          return;
-      }
-
-      // Success logic
-      const jsonStr = JSON.stringify(response);
-      onImport(jsonStr);
-      
-      // Cleanup
-      setPassword('');
-      setUsername('');
-      setCaptchaRequired(false);
-      setCaptchaCode('');
-      setLoginContext(null);
-
-    } catch (err: any) {
-      setError(err.message || "Login failed. Please try Manual Import.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const resetAutoImport = () => {
-      setCaptchaRequired(false);
-      setLoginContext(null);
-      setCaptchaCode('');
-      setError('');
-  };
-
-  const debugHtmlContent = error.includes('DebugHtml:') ? error.split('DebugHtml:')[1] : null;
-  const mainErrorMessage = error.includes('DebugHtml:') ? error.split('DebugHtml:')[0] : error;
-
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-[600px] max-w-full flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
-        <div className="flex items-center justify-between p-4 border-b">
-           <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-             <FileJson size={20} className="text-blue-600"/> Import Schedule
-           </h2>
-           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-[650px] max-w-full flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b">
+           <div>
+             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+               <FileJson size={24} className="text-blue-600"/> Import Schedule
+             </h2>
+             <p className="text-xs text-gray-500 mt-1">从中国科学技术大学教务系统同步课表</p>
+           </div>
+           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 bg-gray-50 p-1 rounded-full"><X size={20}/></button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b">
+        <div className="flex border-b bg-gray-50/50">
            <button 
-             onClick={() => setActiveTab('auto')}
-             className={`flex-1 py-3 text-sm font-bold transition ${activeTab === 'auto' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-gray-500 hover:bg-gray-50'}`}
+             onClick={() => setActiveTab('script')}
+             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'script' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-gray-100'}`}
            >
-             Auto Sync (Login)
+             <Terminal size={16}/> 脚本自动同步 (推荐)
            </button>
            <button 
              onClick={() => setActiveTab('manual')}
-             className={`flex-1 py-3 text-sm font-bold transition ${activeTab === 'manual' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50/50' : 'text-gray-500 hover:bg-gray-50'}`}
+             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'manual' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-gray-100'}`}
            >
-             Manual Paste (JSON)
+             <Copy size={16}/> 手动粘贴 JSON
            </button>
         </div>
 
-        <div className="p-6 overflow-y-auto space-y-4">
+        <div className="p-6 overflow-y-auto">
           
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-2 text-xs border border-red-100 animate-pulse">
-              <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> System Message</div>
-              <div>{mainErrorMessage}</div>
-              
-              {debugHtmlContent && (
-                  <div className="mt-2 bg-red-100 p-2 rounded max-h-32 overflow-y-auto border border-red-200">
-                      <div className="flex items-center gap-1 font-bold mb-1 border-b border-red-200 pb-1">
-                          <Terminal size={10}/> Server Response Preview
-                      </div>
-                      <pre className="font-mono text-[10px] break-all whitespace-pre-wrap">
-                          {debugHtmlContent.trim()}
-                      </pre>
-                  </div>
-              )}
-            </div>
-          )}
+          {status === 'success' ? (
+             <div className="text-center py-10 space-y-4">
+                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Check size={32} />
+                </div>
+                <h3 className="text-xl font-bold text-gray-800">导入成功!</h3>
+                <p className="text-gray-500">课表数据已成功解析并保存。</p>
+                <button onClick={onClose} className="bg-gray-800 text-white px-6 py-2 rounded-lg hover:bg-gray-900 transition">完成</button>
+             </div>
+          ) : activeTab === 'script' ? (
+             <div className="space-y-6">
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 text-sm text-blue-800">
+                   <p className="font-bold mb-1 flex items-center gap-2"><AlertCircle size={16}/> 为什么需要这样操作?</p>
+                   <p className="opacity-90 text-xs leading-relaxed">
+                     由于浏览器的安全策略 (CORS)，我们无法直接读取教务系统的数据。
+                     通过在教务系统页面运行一段简单的脚本，利用您已登录的身份获取数据并传回，是目前最安全、最稳定的方式。
+                   </p>
+                </div>
 
-          {activeTab === 'auto' ? (
-             <form onSubmit={handleAutoImport} className="space-y-4">
-                <div className="bg-blue-50 p-4 rounded-lg text-sm text-blue-800 flex gap-2">
-                   <Globe className="flex-shrink-0 mt-0.5" size={16} />
-                   <div>
-                     <p className="font-bold">Connects to USTC CAS</p>
-                     <p className="opacity-80 text-xs mt-1">
-                       Secure proxy to <code>passport.ustc.edu.cn</code>. 
-                       Handles standard login and captcha verification.
-                     </p>
+                <div className="space-y-4">
+                   {/* Step 1 */}
+                   <div className="flex gap-4 items-start">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center flex-shrink-0">1</div>
+                      <div className="flex-1">
+                         <h4 className="font-bold text-gray-800">打开教务系统并登录</h4>
+                         <p className="text-xs text-gray-500 mb-2">点击下方按钮将在新窗口打开课表页面。请在该窗口完成登录。</p>
+                         <button 
+                           onClick={handleOpenJw}
+                           className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium transition shadow-sm"
+                         >
+                           <ExternalLink size={16}/> 打开 JW 课表页面
+                         </button>
+                      </div>
+                   </div>
+
+                   {/* Step 2 */}
+                   <div className="flex gap-4 items-start">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center flex-shrink-0">2</div>
+                      <div className="flex-1 min-w-0">
+                         <h4 className="font-bold text-gray-800">复制代码并在控制台运行</h4>
+                         <p className="text-xs text-gray-500 mb-2">
+                            在教务系统页面按下 <kbd className="bg-gray-100 border px-1 rounded font-mono">F12</kbd> 打开开发者工具，点击 <strong>Console (控制台)</strong> 标签，粘贴代码并回车。
+                         </p>
+                         
+                         <div className="relative group">
+                            <pre className="bg-slate-800 text-slate-300 p-3 rounded-lg text-[10px] font-mono overflow-x-auto h-24 border border-slate-700">
+                               {CRAWLER_SCRIPT}
+                            </pre>
+                            <button 
+                              onClick={handleCopyScript}
+                              className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white p-1.5 rounded transition backdrop-blur-sm"
+                              title="Copy Code"
+                            >
+                               <Copy size={14}/>
+                            </button>
+                         </div>
+                      </div>
+                   </div>
+
+                   {/* Step 3 */}
+                   <div className="flex gap-4 items-start">
+                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center flex-shrink-0">3</div>
+                      <div className="flex-1">
+                         <h4 className="font-bold text-gray-800">等待同步</h4>
+                         <p className="text-xs text-gray-500">
+                            脚本运行成功后，数据会自动传回此处。如果自动传回失败，脚本会将数据复制到剪贴板，请切换到“手动粘贴”页签使用。
+                         </p>
+                         {status === 'waiting' && (
+                             <div className="mt-2 flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded animate-pulse">
+                                <PlayCircle size={14}/> 正在监听来自教务窗口的数据...
+                             </div>
+                         )}
+                      </div>
                    </div>
                 </div>
-
-                {/* Standard Credentials */}
-                <div className={captchaRequired ? 'opacity-50 pointer-events-none' : ''}>
-                    <div className="mb-3">
-                        <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Student ID</label>
-                        <input 
-                            type="text" 
-                            value={username}
-                            onChange={e => setUsername(e.target.value)}
-                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                            placeholder="PB20xxxx"
-                            disabled={captchaRequired}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Password</label>
-                        <input 
-                            type="password" 
-                            value={password}
-                            onChange={e => setPassword(e.target.value)}
-                            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                            disabled={captchaRequired}
-                        />
-                    </div>
-                </div>
-
-                {/* CAPTCHA SECTION */}
-                {captchaRequired && (
-                    <div className="bg-yellow-50 p-4 rounded border border-yellow-200 animate-in fade-in slide-in-from-top-2">
-                        <div className="flex justify-between items-center mb-2">
-                             <label className="block text-xs font-bold text-yellow-800 uppercase">Security Check</label>
-                             <button type="button" onClick={resetAutoImport} className="text-[10px] text-gray-500 underline">Cancel</button>
-                        </div>
-                        <div className="flex items-center gap-3">
-                             {captchaImage && (
-                                 <img src={captchaImage} alt="Captcha" className="h-10 border rounded shadow-sm" />
-                             )}
-                             <input 
-                                type="text"
-                                autoFocus
-                                value={captchaCode}
-                                onChange={e => setCaptchaCode(e.target.value)}
-                                className="flex-1 p-2 border rounded focus:ring-2 focus:ring-yellow-500 outline-none font-mono text-center tracking-widest uppercase"
-                                placeholder="CODE"
-                             />
-                        </div>
-                        <p className="text-[10px] text-yellow-700 mt-2">
-                           Enter the characters shown in the image to continue.
-                        </p>
-                    </div>
-                )}
-
-                <div className="pt-2">
-                  <button 
-                    type="submit" 
-                    disabled={isLoading}
-                    className="w-full bg-blue-600 text-white font-bold py-2.5 rounded hover:bg-blue-700 flex items-center justify-center gap-2 transition"
-                  >
-                    {isLoading ? <Loader2 className="animate-spin" size={18}/> : (captchaRequired ? <Check size={18}/> : <RefreshCw size={18}/>)}
-                    {isLoading ? (captchaRequired ? "Verifying..." : "Connecting...") : (captchaRequired ? "Submit Verification" : "Login & Sync")}
-                  </button>
-                </div>
-             </form>
+             </div>
           ) : (
              <div className="space-y-4">
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-600 space-y-2">
-                  <h3 className="font-bold flex items-center gap-2 text-gray-800"><HelpCircle size={16}/> Manual Method</h3>
+                  <h3 className="font-bold flex items-center gap-2 text-gray-800"><Terminal size={16}/> 传统方法 (Network 面板)</h3>
                   <ol className="list-decimal list-inside space-y-1 text-xs">
-                    <li>Log in to <a href="https://jw.ustc.edu.cn/for-std/course-table" target="_blank" className="underline text-blue-600" rel="noreferrer">jw.ustc.edu.cn</a> (Chrome/Edge).</li>
-                    <li>Press <kbd className="bg-white px-1 border rounded">F12</kbd> (DevTools) &gt; Network.</li>
-                    <li>Refresh page. Find request <code>get-data</code> (or similar).</li>
-                    <li>Copy the Response content and paste below.</li>
+                    <li>登录 <a href="https://jw.ustc.edu.cn/for-std/course-table" target="_blank" className="underline text-blue-600" rel="noreferrer">jw.ustc.edu.cn</a></li>
+                    <li>按 <kbd className="bg-white px-1 border rounded">F12</kbd> 找到 Network (网络) 标签</li>
+                    <li>刷新页面，在筛选框输入 <code>get-data</code></li>
+                    <li>点击请求，复制 Response (响应) 中的完整内容</li>
                   </ol>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Paste JSON</label>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">粘贴 JSON 数据</label>
                   <textarea 
                     value={jsonInput}
                     onChange={(e) => setJsonInput(e.target.value)}
                     placeholder='{"studentTableVm": { "activities": [...] } ... }'
-                    className="w-full h-32 p-3 bg-gray-50 border border-gray-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                    className="w-full h-40 p-3 bg-gray-50 border border-gray-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                   />
                 </div>
 
-                <button onClick={handleManualImport} className="w-full px-4 py-2.5 text-sm bg-gray-800 text-white rounded hover:bg-gray-900 flex items-center justify-center gap-2">
-                  <Check size={16}/> Parse & Import
+                <button onClick={handleManualImport} className="w-full px-4 py-3 text-sm bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shadow-lg shadow-blue-200 transition">
+                  <Check size={18}/> 解析并导入
                 </button>
              </div>
           )}
