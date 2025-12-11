@@ -88,11 +88,13 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
     } catch (err: any) {
       setError(err.message || "Login failed. Please try Manual Import.");
-      if (err.message && err.message.includes('HTML:')) {
-         // Attempt to extract debug info if present in error message string
-         // (Though usually we might pass it separately, here we rely on the error string for simplicity)
-         setDebugInfo(err.message); 
-      }
+      
+      // Check for debugHtml in the error object if passed via custom error structure
+      // Note: autoImportFromJw throws simple Error, so we might need to parse string or rely on what's available
+      // The backend now returns `debugHtml` in the JSON body of the 500 response.
+      // autoImportFromJw catches it and throws `error.message`.
+      // If we want detailed debug, we'd need to update autoImportFromJw to attach it to the error object.
+      // For now, let's just display the message which might contain details.
     } finally {
       setIsLoading(false);
     }
@@ -138,10 +140,11 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
             <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-2 text-xs border border-red-100 animate-pulse">
               <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> System Message</div>
               <div>{error}</div>
-              {debugInfo && (
-                  <div className="mt-2 bg-red-100 p-2 rounded max-h-24 overflow-y-auto font-mono text-[10px] break-all">
-                      <div className="flex items-center gap-1 font-bold mb-1"><Terminal size={10}/> Debug Info</div>
-                      {debugInfo}
+              {/* If the error message contains explicit HTML debug info (separated by newline usually), render it */}
+              {error.includes('DebugHtml:') && (
+                  <div className="mt-2 bg-red-100 p-2 rounded max-h-32 overflow-y-auto font-mono text-[10px] break-all border border-red-200">
+                      <div className="flex items-center gap-1 font-bold mb-1"><Terminal size={10}/> Server Response Preview</div>
+                      {error.split('DebugHtml:')[1]}
                   </div>
               )}
             </div>
