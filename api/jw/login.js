@@ -69,7 +69,13 @@ const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
 // Helper to decode HTML entities like &amp; to &
 const decodeEntities = (str) => {
   if (!str) return str;
-  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x2F;/g, "/");
 };
 
 // Helper: Detect and follow manual redirects (Meta Refresh, JS, SSO Loading Pages)
@@ -118,12 +124,15 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         if (!redirectUrl && isSsoPage) {
              console.log(`[API] SSO/Loading Page detected (${redirectCount}). Engaging Nuclear URL Extraction.`);
              
+             // Decode entities FIRST to handle cases like href=&quot;...&quot;
+             const decodedHtml = decodeEntities(html);
+
              // Strategy A: Find ALL quoted strings (single, double, or backticks)
              const urlPattern = /(['"`])([^\1]+?)\1/g;
              const candidates = [];
              let match;
 
-             while ((match = urlPattern.exec(html)) !== null) {
+             while ((match = urlPattern.exec(decodedHtml)) !== null) {
                  const val = match[2];
                  // Filter: must look somewhat like a URL (contains / or ? or starts with http or is 'login')
                  if (val.length > 2 && (val.includes('/') || val.includes('?') || val.startsWith('http') || val === 'login')) {
@@ -133,28 +142,34 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
 
              // Strategy B: Find raw unquoted http/https strings
              const rawHttpPattern = /(https?:\/\/[a-zA-Z0-9\-\._~:\/?#\[\]@!$&'()*+,;=]+)/g;
-             while ((match = rawHttpPattern.exec(html)) !== null) {
+             while ((match = rawHttpPattern.exec(decodedHtml)) !== null) {
                  const url = match[1];
                  const cleanUrl = url.split(/["';\s]/)[0]; 
                  if (isValidCandidate(cleanUrl)) candidates.push(cleanUrl);
              }
 
              // Selection Logic
-             // Priority 1: URLs containing keywords
-             const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso') || u.includes('auth'));
-             
-             if (best) {
-                 redirectUrl = best;
-             } else if (candidates.length > 0) {
-                 // Priority 2: First viable candidate
-                 const viable = candidates.find(u => u.length > 3);
-                 if (viable) redirectUrl = viable;
+             // Priority 1: Ticket is KING. If we see a ticket, that's the one.
+             const ticketUrl = candidates.find(u => u.includes('ticket='));
+             if (ticketUrl) {
+                 redirectUrl = ticketUrl;
+             } else {
+                 // Priority 2: URLs containing keywords
+                 const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso') || u.includes('auth'));
+                 
+                 if (best) {
+                     redirectUrl = best;
+                 } else if (candidates.length > 0) {
+                     // Priority 3: First viable candidate
+                     const viable = candidates.find(u => u.length > 3);
+                     if (viable) redirectUrl = viable;
+                 }
              }
         }
 
         if (!redirectUrl) break; // No redirect found
 
-        // Decode HTML entities (important for &amp; in URLs)
+        // Decode HTML entities (again just in case we didn't use the decodedHtml path)
         redirectUrl = decodeEntities(redirectUrl);
 
         // Resolve Relative URL
