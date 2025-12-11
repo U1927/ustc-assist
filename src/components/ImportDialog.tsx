@@ -25,7 +25,6 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   const [loginContext, setLoginContext] = useState<any>(null);
   
   const [error, setError] = useState('');
-  const [debugInfo, setDebugInfo] = useState('');
 
   if (!isOpen) return null;
 
@@ -52,7 +51,6 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
     setIsLoading(true);
     setError('');
-    setDebugInfo('');
 
     try {
       // Pass captcha and context if we are in phase 2
@@ -84,17 +82,9 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       setCaptchaRequired(false);
       setCaptchaCode('');
       setLoginContext(null);
-      setDebugInfo('');
 
     } catch (err: any) {
       setError(err.message || "Login failed. Please try Manual Import.");
-      
-      // Check for debugHtml in the error object if passed via custom error structure
-      // Note: autoImportFromJw throws simple Error, so we might need to parse string or rely on what's available
-      // The backend now returns `debugHtml` in the JSON body of the 500 response.
-      // autoImportFromJw catches it and throws `error.message`.
-      // If we want detailed debug, we'd need to update autoImportFromJw to attach it to the error object.
-      // For now, let's just display the message which might contain details.
     } finally {
       setIsLoading(false);
     }
@@ -105,8 +95,10 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       setLoginContext(null);
       setCaptchaCode('');
       setError('');
-      setDebugInfo('');
   };
+
+  const debugHtmlContent = error.includes('DebugHtml:') ? error.split('DebugHtml:')[1] : null;
+  const mainErrorMessage = error.includes('DebugHtml:') ? error.split('DebugHtml:')[0] : error;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -139,12 +131,16 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
           {error && (
             <div className="bg-red-50 text-red-600 p-3 rounded flex flex-col gap-2 text-xs border border-red-100 animate-pulse">
               <div className="flex items-center gap-2 font-bold"><AlertCircle size={14} /> System Message</div>
-              <div>{error}</div>
-              {/* If the error message contains explicit HTML debug info (separated by newline usually), render it */}
-              {error.includes('DebugHtml:') && (
-                  <div className="mt-2 bg-red-100 p-2 rounded max-h-32 overflow-y-auto font-mono text-[10px] break-all border border-red-200">
-                      <div className="flex items-center gap-1 font-bold mb-1"><Terminal size={10}/> Server Response Preview</div>
-                      {error.split('DebugHtml:')[1]}
+              <div>{mainErrorMessage}</div>
+              
+              {debugHtmlContent && (
+                  <div className="mt-2 bg-red-100 p-2 rounded max-h-32 overflow-y-auto border border-red-200">
+                      <div className="flex items-center gap-1 font-bold mb-1 border-b border-red-200 pb-1">
+                          <Terminal size={10}/> Server Response Preview
+                      </div>
+                      <pre className="font-mono text-[10px] break-all whitespace-pre-wrap">
+                          {debugHtmlContent.trim()}
+                      </pre>
                   </div>
               )}
             </div>
