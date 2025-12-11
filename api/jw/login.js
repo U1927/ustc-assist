@@ -85,31 +85,36 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         // 1. Check for specific USTC SSO / Loading Page markers
         if (html.includes('id="sso_redirect"') || html.includes('id=\'sso_redirect\'')) {
              console.log(`[API] USTC SSO Loading Page detected (${redirectCount})`);
-             // Extract URL from script
-             // Look for simple location assignment: location.href = "..."
+             
+             // Strategy A: Standard Location Assignments
              let match = html.match(/(?:location\.href|window\.location)\s*=\s*['"]([^'"]+)['"]/);
              if (!match) match = html.match(/location\.replace\(['"]([^'"]+)['"]\)/);
              
-             if (match) {
-                 redirectUrl = match[1];
-             } else {
-                 // Fallback: look for the service URL specifically (safer than generic https match)
-                 // Matches https://jw.ustc.edu.cn/ucas-sso/login or similar service URLs
-                 const serviceMatch = html.match(/['"](https?:\/\/[^'"]+(?:login|service|sso)[^'"]*)['"]/i);
-                 if (serviceMatch) redirectUrl = serviceMatch[1];
+             // Strategy B: Service / Login URL patterns in code
+             if (!match) match = html.match(/['"](https?:\/\/[^'"]+(?:login|service|sso)[^'"]*)['"]/i);
+             
+             // Strategy C: Relative paths in assignments
+             if (!match) match = html.match(/(?:location\.href|window\.location)\s*=\s*['"](\/[^'"]+)['"]/);
 
-                 // Desperate Fallback: Find ANY http link inside a script tag
-                 if (!redirectUrl) {
-                     const anyLinkMatch = html.match(/<script[^>]*>.*?['"](https?:\/\/[^'"]+)['"].*?<\/script>/s);
-                     if (anyLinkMatch) {
-                         // Filter out common libs
-                         const candidate = anyLinkMatch[1];
-                         if (!candidate.includes('jquery') && !candidate.includes('vue') && !candidate.includes('react')) {
-                             redirectUrl = candidate;
+             // Strategy D (Aggressive): Find ANY URL-like string inside <script> tags
+             if (!match) {
+                 const scripts = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+                 if (scripts) {
+                     for (const script of scripts) {
+                         const urlCandidate = script.match(/['"]((?:https?:\/\/|\/)[a-zA-Z0-9\-\._\/]+\?[^'"]*)['"]/);
+                         if (urlCandidate) {
+                             const candidate = urlCandidate[1];
+                             // Filter out common libraries to reduce false positives
+                             if (!candidate.includes('jquery') && !candidate.includes('vue') && !candidate.includes('.js') && !candidate.includes('.css')) {
+                                 match = urlCandidate;
+                                 break;
+                             }
                          }
                      }
                  }
              }
+
+             if (match) redirectUrl = match[1];
         }
 
         // 2. Meta Refresh
@@ -121,19 +126,13 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
             }
         }
 
-        // 3. General JS Redirects
+        // 3. General JS Redirects (if not caught above)
         if (!redirectUrl) {
             const jsAssignment = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
             const jsCall = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
-            const jsNavigate = html.match(/window\.navigate\s*\(\s*["']([^"']+)["']\s*\)/);
-
-            if (jsAssignment) {
-                redirectUrl = jsAssignment[1];
-            } else if (jsCall) {
-                redirectUrl = jsCall[1];
-            } else if (jsNavigate) {
-                redirectUrl = jsNavigate[1];
-            }
+            
+            if (jsAssignment) redirectUrl = jsAssignment[1];
+            else if (jsCall) redirectUrl = jsCall[1];
         }
 
         if (!redirectUrl) break; // No redirect found
@@ -150,7 +149,10 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         }
 
         // Prevent infinite loops if redirecting to self
-        if (redirectUrl === currentUrl) break;
+        if (redirectUrl === currentUrl) {
+             console.log('[API] Redirect loop detected (Self). Stopping.');
+             break;
+        }
 
         try {
             console.log(`[API] Following redirect (${redirectCount + 1}): ${redirectUrl}`);
@@ -163,7 +165,7 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
             const newCookies = getCookies(res);
             if (newCookies) sessionCookies += '; ' + newCookies;
             
-            html = res.data; // Now guaranteed to be string (or empty)
+            html = res.data; 
             currentUrl = redirectUrl;
             redirectCount++;
         } catch (e) {
@@ -226,7 +228,7 @@ export default async function handler(req, res) {
         console.log('[API] 1. Fetching CAS login page (New Session)...');
         let loginPage = await axios.get(CAS_LOGIN_URL, { 
             headers: BROWSER_HEADERS,
-            responseType: 'text' // Force text to avoid object crash
+            responseType: 'text' 
         });
         
         sessionCookies = getCookies(loginPage);
@@ -295,12 +297,16 @@ export default async function handler(req, res) {
         // 4. Critical Token Validation
         if (!execution) {
              const title = $('title').text() || "No Title Found";
+             // If we're still stuck on the SSO Redirect page, parsing failed.
+             const isSsoPage = html.includes('id="sso_redirect"');
+             const errorType = isSsoPage ? "Stuck on SSO Loading Page" : "Parsing Failed";
+
              const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid HTML Content";
-             console.error(`[API] Parsing Failed. Title: ${title}`);
+             console.error(`[API] ${errorType}. Title: ${title}`);
              
              return res.status(500).json({ 
                  success: false, 
-                 error: `CAS Page Parsing Failed. The page might be blocked or changed.`,
+                 error: `CAS Page Parsing Failed. System returned "${title}".`,
                  debugHtml: `Page Title: ${title}\n\nHTML Snippet (Top 2k chars):\n${snippet}`
              });
         }
@@ -332,7 +338,7 @@ export default async function handler(req, res) {
       },
       maxRedirects: 0, 
       validateStatus: (status) => status >= 200 && status < 400,
-      responseType: 'text' // Force text
+      responseType: 'text'
     });
 
     const newCookies = getCookies(loginResponse);
@@ -349,7 +355,6 @@ export default async function handler(req, res) {
         
         if (redirectCheck.currentUrl !== CAS_LOGIN_URL) {
             console.log('[API] Login returned 200 but contained redirect (Success). Proceeding.');
-            // Update state to point to where we landed (likely JW Middleware)
             html = redirectCheck.html;
             sessionCookies = redirectCheck.sessionCookies;
         } else {
@@ -406,7 +411,6 @@ export default async function handler(req, res) {
     }
 
     // --- STEP 4: FETCH COURSE DATA ---
-    // Whether we came from 302 or 200-redirect, we assume we are logged in now.
     
     console.log('[API] 4. Fetching Course Data...');
     const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
@@ -414,18 +418,15 @@ export default async function handler(req, res) {
             ...BROWSER_HEADERS,
             'Cookie': sessionCookies 
         },
-        responseType: 'text' // Force text
+        responseType: 'text'
     });
     
-    // --- STEP 4.1: Handle JW Redirects (Loading screens, #sso_redirect, etc) ---
-    // This is the critical part that was failing before
     let pageHtml = tablePageResponse.data;
     const jwRedirectResult = await followPageRedirects(pageHtml, 'https://jw.ustc.edu.cn/for-std/course-table', sessionCookies, BROWSER_HEADERS);
     pageHtml = jwRedirectResult.html;
     sessionCookies = jwRedirectResult.sessionCookies;
 
     // --- STEP 4.2: Parse Data ---
-    // Strategy A: Find StudentID and call API
     const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
     const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
 
@@ -449,13 +450,10 @@ export default async function handler(req, res) {
             return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
     }
 
-    // --- FAILURE DEBUGGING ---
     const $jw = cheerio.load(pageHtml);
     const title = $jw('title').text() || "No Title";
     const snippet = (pageHtml && typeof pageHtml === 'string') ? pageHtml.substring(0, 2000).replace(/</g, '&lt;') : "Invalid Content";
     
-    console.error(`[API] JW Parsing Failed. Title: ${title}`);
-
     return res.status(500).json({ 
         success: false, 
         error: 'Login successful, but failed to extract schedule data from JW page.',
