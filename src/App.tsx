@@ -32,7 +32,6 @@ const App: React.FC = () => {
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
-  const [isValidatingTicket, setIsValidatingTicket] = useState(false);
 
   // Single Event Form
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'activity', startTime: '', endTime: '' });
@@ -47,71 +46,15 @@ const App: React.FC = () => {
     schedule: [{ day: 1, periods: '3-4' }] as { day: number, periods: string }[]
   });
 
-  // 1. Initialization & CAS Ticket Validation
+  // 1. Initialization
   useEffect(() => {
-    const init = async () => {
-      // A. Check for CAS Ticket
-      const params = new URLSearchParams(window.location.search);
-      const ticket = params.get('ticket');
-      
-      if (ticket) {
-        await validateCasTicket(ticket);
-        return; // validated or failed, state updated inside
-      }
-
-      // B. Load Local Session
-      const savedUser = Storage.getUserSession();
-      if (savedUser && savedUser.isLoggedIn) {
-        setUser(savedUser);
-        loadCloudData(savedUser.studentId);
-      }
-    };
-    init();
-  }, []);
-
-  const validateCasTicket = async (ticket: string) => {
-    setIsValidatingTicket(true);
-    try {
-      // Service must match the one sent to login (current page origin + path)
-      const service = window.location.origin + window.location.pathname;
-      const res = await fetch(`/api/cas?ticket=${ticket}&service=${encodeURIComponent(service)}`);
-      const data = await res.json();
-      
-      if (data.success && data.studentId) {
-         // Login Success
-         const semesterStart = Utils.getSemesterDefaultStartDate();
-         const newUser: UserProfile = {
-           studentId: data.studentId,
-           name: `Student ${data.studentId}`,
-           isLoggedIn: true,
-           settings: {
-             earlyEightReminder: true,
-             reminderMinutesBefore: 15,
-             semester: {
-                name: 'Current Semester',
-                startDate: semesterStart,
-                totalWeeks: 18
-             }
-           }
-         };
-         
-         setUser(newUser);
-         Storage.saveUserSession(newUser);
-         loadCloudData(newUser.studentId);
-
-         // Clean URL
-         window.history.replaceState({}, document.title, window.location.pathname);
-      } else {
-         alert(`Login Failed: ${data.error}`);
-         // Redirect to remove bad ticket? Or just stay
-         window.history.replaceState({}, document.title, window.location.pathname);
-      }
-    } catch (e: any) {
-      alert(`Validation Network Error: ${e.message}`);
-    } finally {
-      setIsValidatingTicket(false);
+    // Load Local Session
+    const savedUser = Storage.getUserSession();
+    if (savedUser && savedUser.isLoggedIn) {
+      setUser(savedUser);
+      loadCloudData(savedUser.studentId);
     }
-  };
+  }, []);
 
   const loadCloudData = async (studentId: string) => {
     setSyncStatus('syncing');
@@ -226,8 +169,6 @@ const App: React.FC = () => {
     Storage.clearSession();
     setIsDataLoaded(false);
     setEvents([]);
-    // Remove ticket params just in case
-    window.history.replaceState({}, document.title, window.location.pathname);
     window.location.reload();
   };
 
@@ -367,15 +308,6 @@ const App: React.FC = () => {
       default: return <span className="flex items-center gap-1 text-gray-400 text-xs"><Cloud size={12}/> Cloud Ready</span>;
     }
   };
-
-  if (isValidatingTicket) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 flex-col gap-4">
-         <Loader2 className="animate-spin text-blue-600" size={48} />
-         <div className="text-gray-600 font-medium">Validating Identity...</div>
-      </div>
-    );
-  }
 
   if (!user) return <Login onLogin={handleLogin} />;
 
