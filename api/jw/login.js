@@ -82,80 +82,62 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
              break;
         }
 
-        // 1. Check for specific USTC SSO / Loading Page markers
-        if (html.includes('id="sso_redirect"') || html.includes('id=\'sso_redirect\'')) {
-             console.log(`[API] USTC SSO Loading Page detected (${redirectCount})`);
-             
-             // Strategy A: Standard Location Assignments
-             let match = html.match(/(?:location\.href|window\.location)\s*=\s*['"]([^'"]+)['"]/);
-             if (!match) match = html.match(/location\.replace\(['"]([^'"]+)['"]\)/);
-             
-             // Strategy B: Service / Login URL patterns in code
-             if (!match) match = html.match(/['"](https?:\/\/[^'"]+(?:login|service|sso)[^'"]*)['"]/i);
-             
-             // Strategy C: Relative paths in assignments
-             if (!match) match = html.match(/(?:location\.href|window\.location)\s*=\s*['"](\/[^'"]+)['"]/);
+        // 0. Check for specific markers indicating a loading/redirect page
+        const isSsoPage = html.includes('id="sso_redirect"') || 
+                          html.includes('id=\'sso_redirect\'') || 
+                          html.includes('正在跳转') ||
+                          html.includes('loading');
 
-             // Strategy D (Aggressive): Find ANY URL-like string inside <script> tags
-             if (!match) {
-                 const scripts = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
-                 if (scripts) {
-                     for (const script of scripts) {
-                         // Find all strings that look like URLs (http or /)
-                         // Regex: quote, (http/s or /), anything not quote, quote
-                         const urlMatches = [...script.matchAll(/(["'])((?:https?:\/\/|\/)[^\1]+?)\1/g)];
-                         
-                         for (const m of urlMatches) {
-                             const url = m[2];
-                             
-                             // Filter out obvious assets to find the likely redirect URL
-                             if (
-                                 !url.includes('.css') && 
-                                 !url.includes('.png') && 
-                                 !url.includes('.jpg') && 
-                                 !url.includes('.gif') &&
-                                 !url.includes('.ico') &&
-                                 !url.includes('.js') && // usually we don't redirect to a .js file
-                                 !url.includes('jquery') &&
-                                 !url.includes('vue') &&
-                                 !url.includes('axios')
-                             ) {
-                                 // Prefer URLs with keywords
-                                 if (url.includes('login') || url.includes('service') || url.includes('sso') || url.includes('ucas')) {
-                                     match = [null, url]; 
-                                     break;
-                                 }
-                                 // If it's a very short relative path, might be it
-                                 if (url.startsWith('/') && url.length < 50) {
-                                     // Store as candidate, but keep looking for better one
-                                     if (!match) match = [null, url];
-                                 }
-                             }
-                         }
-                         if (match) break;
-                     }
-                 }
-             }
-
-             if (match) redirectUrl = match[1];
-        }
-
-        // 2. Meta Refresh
+        // 1. Meta Refresh (High Priority standard)
         if (!redirectUrl) {
-            const metaMatch = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
-            if (metaMatch) {
-                redirectUrl = metaMatch[1];
-                console.log(`[API] Meta Refresh detected.`);
-            }
+             const metaMatch = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
+             if (metaMatch) redirectUrl = metaMatch[1];
         }
 
-        // 3. General JS Redirects (if not caught above)
+        // 2. Standard JS assignments
         if (!redirectUrl) {
             const jsAssignment = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
             const jsCall = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
-            
             if (jsAssignment) redirectUrl = jsAssignment[1];
             else if (jsCall) redirectUrl = jsCall[1];
+        }
+
+        // 3. Nuclear Option for SSO Pages (Aggressive String Search)
+        // If we are on an SSO page but regex failed, scan for ANY URL string.
+        if (!redirectUrl && isSsoPage) {
+             console.log(`[API] SSO/Loading Page detected (${redirectCount}). Engaging Nuclear URL Extraction.`);
+             
+             // Find ALL quoted strings that look like URLs (single, double, or backticks)
+             const urlPattern = /(['"`])((?:https?:\/\/|\/)[^\1]+?)\1/g;
+             const candidates = [];
+             let match;
+
+             while ((match = urlPattern.exec(html)) !== null) {
+                 const url = match[2];
+                 // Filter out typical assets and libraries to avoid false positives
+                 if (
+                     !url.match(/\.(css|png|jpg|jpeg|gif|ico|svg|js|woff2?|ttf|eot)$/i) &&
+                     !url.includes('jquery') &&
+                     !url.includes('axios') &&
+                     !url.includes('vue') &&
+                     !url.includes('react') &&
+                     !url.includes('node_modules') &&
+                     url.trim().length > 1
+                 ) {
+                     candidates.push(url);
+                 }
+             }
+
+             // Priority A: URLs containing login/service keywords
+             const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso'));
+             
+             if (best) {
+                 redirectUrl = best;
+             } else if (candidates.length > 0) {
+                 // Priority B: The first viable candidate that looks like a path or http
+                 const viable = candidates.find(u => u.length > 5 && (u.startsWith('http') || u.startsWith('/')));
+                 if (viable) redirectUrl = viable;
+             }
         }
 
         if (!redirectUrl) break; // No redirect found
@@ -284,7 +266,6 @@ export default async function handler(req, res) {
         }
 
         if (!execution) {
-            // Find inputs with name="execution"
             const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
             const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
             const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
@@ -292,13 +273,11 @@ export default async function handler(req, res) {
         }
 
         if (!execution) {
-             // Look for JS variables often used in SPA logins
              const scriptMatch = html.match(/["']?execution["']?\s*[:=]\s*["']([^"']+)["']/i);
              if (scriptMatch) execution = scriptMatch[1];
         }
 
         if (!execution) {
-             // Desperate regex for e1s1 style tokens
              const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
              if (execMatch) execution = execMatch[1];
         }
@@ -320,11 +299,10 @@ export default async function handler(req, res) {
         // 4. Critical Token Validation
         if (!execution) {
              const title = $('title').text() || "No Title Found";
-             // If we're still stuck on the SSO Redirect page, parsing failed.
              const isSsoPage = html.includes('id="sso_redirect"');
              const errorType = isSsoPage ? "Stuck on SSO Loading Page" : "Parsing Failed";
-
              const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid HTML Content";
+             
              console.error(`[API] ${errorType}. Title: ${title}`);
              
              return res.status(500).json({ 
@@ -372,8 +350,7 @@ export default async function handler(req, res) {
     if (loginResponse.status === 200) {
         let html = loginResponse.data;
         
-        // CHECK: Is this a success page masquerading as 200 (using JS Redirect)?
-        // If it contains #sso_redirect, it's actually successful and proceeding to next step
+        // Check if it's actually a redirect disguised as 200
         const redirectCheck = await followPageRedirects(html, CAS_LOGIN_URL, sessionCookies, BROWSER_HEADERS);
         
         if (redirectCheck.currentUrl !== CAS_LOGIN_URL) {
@@ -381,11 +358,9 @@ export default async function handler(req, res) {
             html = redirectCheck.html;
             sessionCookies = redirectCheck.sessionCookies;
         } else {
-            // It's a real 200 Failure (Error Page or Captcha Page)
             const $err = cheerio.load(html);
             let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
 
-            // Check if verification error
             const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
             
             if (captchaCheck.found) {
@@ -463,7 +438,6 @@ export default async function handler(req, res) {
         return res.json({ success: true, data: dataResponse.data });
     } 
     
-    // Strategy B: Find embedded JSON in script tags
     const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s) || 
                             pageHtml.match(/activities\s*:\s*(\[.*?\])/s) ||
                             pageHtml.match(/lessonList\s*:\s*(\[.*?\])/s);
