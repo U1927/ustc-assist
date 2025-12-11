@@ -33,6 +33,9 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
+  // Mounted Ref to prevent state updates on unmounted components (Fixes NotFoundError)
+  const isMountedRef = useRef(true);
+
   // Single Event Form
   const [newEvent, setNewEvent] = useState<Partial<ScheduleItem>>({ type: 'activity', startTime: '', endTime: '' });
 
@@ -53,21 +56,24 @@ const App: React.FC = () => {
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
     }
+    
+    // Cleanup for unmount
+    return () => { isMountedRef.current = false; };
   }, []);
 
   // Separate effect for loading cloud data to handle mounting state correctly
   useEffect(() => {
-    let isMounted = true;
+    isMountedRef.current = true;
 
     if (user && user.isLoggedIn) {
       const fetchCloud = async () => {
-        if (!isMounted) return;
+        if (!isMountedRef.current) return;
         setSyncStatus('syncing');
         console.log(`[App] Loading cloud data for ${user.studentId}...`);
         
         const data = await Storage.fetchUserData(user.studentId);
         
-        if (isMounted) {
+        if (isMountedRef.current) {
           if (data) {
             console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
             setEvents(data.schedule);
@@ -84,24 +90,21 @@ const App: React.FC = () => {
       
       fetchCloud();
     }
-
-    return () => { isMounted = false; };
   }, [user?.studentId]); // Only re-run if student ID changes
 
   // 2. Auto-Save Logic
   useEffect(() => {
-    let isMounted = true;
     if (!user || !isDataLoaded) return;
 
     const timeoutId = setTimeout(async () => {
-      if (!isMounted) return;
+      if (!isMountedRef.current) return;
       setSyncStatus('syncing');
       const result = await Storage.saveUserData(user.studentId, events, todos);
       
-      if (isMounted) {
+      if (isMountedRef.current) {
           if (result.success) {
             setSyncStatus('saved');
-            setTimeout(() => { if(isMounted) setSyncStatus('idle'); }, 2000);
+            setTimeout(() => { if(isMountedRef.current) setSyncStatus('idle'); }, 2000);
           } else {
             setSyncStatus('error');
           }
@@ -109,10 +112,7 @@ const App: React.FC = () => {
     }, 500);
 
     setConflicts(Utils.getConflicts(events));
-    return () => { 
-        clearTimeout(timeoutId);
-        isMounted = false; 
-    };
+    return () => clearTimeout(timeoutId);
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session
