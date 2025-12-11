@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { validateStudentId } from '../services/utils';
 import { UserProfile } from '../types';
-import { BookOpen, ShieldCheck, ExternalLink, UserPlus, LogIn } from 'lucide-react';
+import { BookOpen, ShieldCheck, ExternalLink, UserPlus, LogIn, Database } from 'lucide-react';
 import * as Utils from '../services/utils';
 import * as Storage from '../services/storageService';
 
@@ -14,43 +14,49 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Local Validation
+    // 1. Basic Validation
     if (!validateStudentId(studentId)) {
-      setError('Invalid ID format. Ex: PB20000001');
+      setError('Invalid ID format. (e.g. PB20000001)');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters.');
       return;
     }
 
     setIsLoading(true);
     setError('');
+    setSuccessMsg('');
 
     try {
       const cleanId = studentId.toUpperCase().trim();
 
       if (isRegistering) {
-        // --- REGISTER ---
+        // --- REAL REGISTER ---
         const res = await Storage.registerUser(cleanId, password);
+        
         if (res.success) {
-          alert("Registration successful! Please log in.");
-          setIsRegistering(false); // Switch to login mode
+          setSuccessMsg("Registration successful! Please log in.");
+          setIsRegistering(false); // Switch back to login view
           setPassword(''); // Clear password for security
         } else {
-          setError(res.error || "Registration failed");
+          // Handle specific errors (e.g., "User already exists", "Database not connected")
+          setError(res.error || "Registration failed.");
         }
       } else {
-        // --- LOGIN ---
+        // --- REAL LOGIN ---
         const res = await Storage.loginUser(cleanId, password);
+        
         if (res.success) {
-          // Initialize default settings (Settings are currently local-first or merged later)
+          // Initialize default profile structure
+          // Note: Actual schedule data is fetched in App.tsx after login
           const semesterStart = Utils.getSemesterDefaultStartDate();
           
           const userProfile: UserProfile = {
@@ -70,7 +76,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           
           onLogin(userProfile);
         } else {
-          setError(res.error || "Login failed. Please check credentials.");
+          // Handle specific errors (e.g., "Incorrect password", "User not found")
+          setError(res.error || "Login failed.");
         }
       }
     } catch (err: any) {
@@ -78,6 +85,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const toggleMode = () => {
+    setIsRegistering(!isRegistering);
+    setError('');
+    setSuccessMsg('');
+    setPassword('');
   };
 
   return (
@@ -97,7 +111,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
            <h1 className="text-xl font-bold text-gray-800">
              {isRegistering ? 'Create Account' : 'Welcome Back'}
            </h1>
-           <p className="text-xs text-gray-500 mt-1">USTC Learning Assistant Cloud</p>
+           <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+             <Database size={10} /> USTC Assistant Cloud
+           </p>
         </div>
 
         <form onSubmit={handleAuth} className="space-y-4">
@@ -121,11 +137,19 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Choose a secure password"
+              placeholder={isRegistering ? "Set a strong password" : "Enter your password"}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm"
             />
           </div>
 
+          {/* Success Message */}
+          {successMsg && (
+            <div className="text-green-600 text-xs bg-green-50 p-2 rounded border border-green-200 flex items-center gap-1 text-center justify-center font-bold">
+               {successMsg}
+            </div>
+          )}
+
+          {/* Error Message */}
           {error && (
             <div className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200 flex items-center gap-1 animate-pulse">
               <ShieldCheck size={12} /> {error}
@@ -135,38 +159,40 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded shadow-lg transform active:scale-95 transition duration-150 flex items-center justify-center gap-2"
+            className={`w-full text-white font-bold py-2.5 rounded shadow-lg transform active:scale-95 transition duration-150 flex items-center justify-center gap-2 ${
+              isRegistering ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'
+            }`}
           >
             {isLoading ? (
-              'Processing...'
+              'Connecting...'
             ) : isRegistering ? (
-              <><UserPlus size={18} /> Register</>
+              <><UserPlus size={18} /> Register Account</>
             ) : (
               <><LogIn size={18} /> Login</>
             )}
           </button>
         </form>
 
-        <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col items-center gap-2">
-           <button 
-             onClick={() => {
-               setIsRegistering(!isRegistering);
-               setError('');
-               setPassword('');
-             }}
-             className="text-sm text-blue-600 hover:text-blue-800 font-medium transition"
-           >
-             {isRegistering ? 'Already have an account? Login' : 'New here? Create an account'}
-           </button>
+        <div className="mt-6 pt-4 border-t border-gray-100 flex flex-col items-center gap-3">
+           {/* Toggle Register/Login */}
+           <div className="text-sm text-gray-600">
+             {isRegistering ? "Already have an account?" : "No account yet?"}{' '}
+             <button 
+               onClick={toggleMode}
+               className="text-blue-600 hover:text-blue-800 font-bold hover:underline transition"
+             >
+               {isRegistering ? 'Login here' : 'Register now'}
+             </button>
+           </div>
 
            {!isRegistering && (
             <a 
                 href="https://passport.ustc.edu.cn/login" 
                 target="_blank" 
                 rel="noreferrer"
-                className="text-xs text-gray-400 hover:text-gray-600 hover:underline flex items-center gap-1 mt-2"
+                className="text-xs text-gray-400 hover:text-gray-600 hover:underline flex items-center gap-1"
             >
-                Forgot Password? (Use Official Passport) <ExternalLink size={10} />
+                Forgot Password? (Manual Reset Required) <ExternalLink size={10} />
             </a>
            )}
         </div>
