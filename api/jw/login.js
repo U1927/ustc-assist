@@ -103,44 +103,51 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         // 2. Standard JS assignments
         if (!redirectUrl) {
             const jsAssignment = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/);
+            const jsAssignmentTemplate = html.match(/(?:window\.|self\.|top\.)?location(?:\.href)?\s*=\s*`([^`]+)`/); // ES6 Backticks
             const jsCall = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']\s*\)/);
+            const jsCallTemplate = html.match(/(?:window\.|self\.|top\.)?location\.(?:replace|assign)\s*\(\s*`([^`]+)`\s*\)/);
+            
             if (jsAssignment) redirectUrl = jsAssignment[1];
+            else if (jsAssignmentTemplate) redirectUrl = jsAssignmentTemplate[1];
             else if (jsCall) redirectUrl = jsCall[1];
+            else if (jsCallTemplate) redirectUrl = jsCallTemplate[1];
         }
 
         // 3. Nuclear Option for SSO Pages (Aggressive String Search)
-        // If we are on an SSO page but regex failed, scan for ANY URL string.
+        // If we are on an SSO page but regex failed, scan for ANY string that looks like a URL.
         if (!redirectUrl && isSsoPage) {
              console.log(`[API] SSO/Loading Page detected (${redirectCount}). Engaging Nuclear URL Extraction.`);
              
-             // Strategy A: Find quoted strings (previous logic)
-             const urlPattern = /(['"`])((?:https?:\/\/|\/)[^\1]+?)\1/g;
+             // Strategy A: Find ALL quoted strings (single, double, or backticks)
+             const urlPattern = /(['"`])([^\1]+?)\1/g;
              const candidates = [];
              let match;
 
              while ((match = urlPattern.exec(html)) !== null) {
-                 const url = match[2];
-                 if (isValidCandidate(url)) candidates.push(url);
+                 const val = match[2];
+                 // Filter: must look somewhat like a URL (contains / or ? or starts with http or is 'login')
+                 if (val.length > 2 && (val.includes('/') || val.includes('?') || val.startsWith('http') || val === 'login')) {
+                    if (isValidCandidate(val)) candidates.push(val);
+                 }
              }
 
              // Strategy B: Find raw unquoted http/https strings
              const rawHttpPattern = /(https?:\/\/[a-zA-Z0-9\-\._~:\/?#\[\]@!$&'()*+,;=]+)/g;
              while ((match = rawHttpPattern.exec(html)) !== null) {
                  const url = match[1];
-                 // Often ends with a quote or bracket if captured greedily
                  const cleanUrl = url.split(/["';\s]/)[0]; 
                  if (isValidCandidate(cleanUrl)) candidates.push(cleanUrl);
              }
 
              // Selection Logic
-             // Priority 1: URLs containing login/service/passport/sso
-             const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso'));
+             // Priority 1: URLs containing keywords
+             const best = candidates.find(u => u.includes('login') || u.includes('service') || u.includes('passport') || u.includes('oauth') || u.includes('sso') || u.includes('auth'));
              
              if (best) {
                  redirectUrl = best;
              } else if (candidates.length > 0) {
-                 // Priority 2: The first viable candidate that looks like a path or http
-                 const viable = candidates.find(u => u.length > 8 && (u.startsWith('http') || u.startsWith('/')));
+                 // Priority 2: First viable candidate
+                 const viable = candidates.find(u => u.length > 3);
                  if (viable) redirectUrl = viable;
              }
         }
@@ -154,8 +161,10 @@ const followPageRedirects = async (initialHtml, initialUrl, cookies, headers) =>
         if (!redirectUrl.startsWith('http')) {
             const origin = new URL(currentUrl).origin;
             if (redirectUrl.startsWith('/')) {
+                // Absolute path relative to domain
                 redirectUrl = origin + redirectUrl;
             } else {
+                // Relative path
                 const path = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
                 redirectUrl = path + redirectUrl;
             }
@@ -199,6 +208,7 @@ function isValidCandidate(url) {
            !url.includes('react') &&
            !url.includes('node_modules') &&
            !url.includes('w3.org') &&
+           !url.startsWith('javascript:') &&
            url.trim().length > 1;
 }
 
@@ -319,7 +329,7 @@ export default async function handler(req, res) {
         // 4. Critical Token Validation
         if (!execution) {
              const title = $('title').text() || "No Title Found";
-             const isSsoPage = html.includes('id="sso_redirect"');
+             const isSsoPage = html.includes('id="sso_redirect"') || html.includes('loading');
              const errorType = isSsoPage ? "Stuck on SSO Loading Page" : "Parsing Failed";
              const snippet = (html && typeof html === 'string') ? html.substring(0, 2000).replace(/</g, '&lt;') : "Invalid HTML Content";
              
