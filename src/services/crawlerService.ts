@@ -9,18 +9,45 @@ import { ScheduleItem } from '../types';
 const JW_BASE_URL = 'https://jw.ustc.edu.cn';
 const YOUNG_BASE_URL = 'https://young.ustc.edu.cn';
 
-// Call the proxy server defined in server.js
+/**
+ * 1. PURE AUTHENTICATION (Used by Login/Register)
+ * Verifies username/password with CAS, does NOT fetch data.
+ */
+export const verifyCredential = async (
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+): Promise<any> => {
+  return callProxy(username, pass, 'auth', captchaCode, context);
+};
+
+/**
+ * 2. FULL SYNC (Used by Import Dialog)
+ * Authenticates AND fetches First/Second classroom data.
+ */
 export const autoImportFromJw = async (
   username: string, 
   pass: string, 
   captchaCode?: string, 
   context?: any
 ): Promise<any> => {
+  return callProxy(username, pass, 'fetch', captchaCode, context);
+};
+
+// Internal Helper
+const callProxy = async (
+  username: string, 
+  pass: string, 
+  mode: 'auth' | 'fetch',
+  captchaCode?: string, 
+  context?: any
+) => {
   try {
     const payload: any = { 
         username, 
         password: pass,
-        includeSecondClassroom: true 
+        mode: mode // Send mode to server
     };
     if (captchaCode) payload.captchaCode = captchaCode;
     if (context) payload.context = context;
@@ -49,15 +76,15 @@ export const autoImportFromJw = async (
     if (result.requireCaptcha) return result;
 
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Login failed');
+      throw new Error(result.error || 'Operation failed');
     }
 
-    return result.data; // { firstClassroom: [], secondClassroom: [] }
+    return result.data || { success: true }; // auth mode might not return data
   } catch (error: any) {
-    console.error('Auto Import Error:', error);
+    console.error('Proxy Call Error:', error);
     throw new Error(error.message || "Network Error");
   }
-};
+}
 
 // Legacy mock function - kept for compatibility
 export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
