@@ -133,26 +133,10 @@ const App: React.FC = () => {
     } catch (e: any) { alert(`Failed: ${e.message}`); }
   };
 
-  // Handle Login Logic - receive rawSyncData if just registered
-  const handleLogin = (loggedInUser: UserProfile, rawSyncData?: any) => {
+  const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
-    
-    // If we have raw data from registration, process it HERE, in the App context
-    if (rawSyncData && loggedInUser.settings.semester.startDate) {
-        try {
-            console.log("[App] Processing initial sync data...");
-            const initialEvents = UstcParser.parseJwJson(rawSyncData, loggedInUser.settings.semester.startDate);
-            setEvents(initialEvents);
-            Storage.saveUserData(loggedInUser.studentId, initialEvents, []); // Save to cloud immediately
-        } catch (e) {
-            console.error("[App] Failed to parse initial data:", e);
-        }
-    } else {
-        // Normal login, fetch from DB
-        loadData(loggedInUser.studentId);
-    }
-    
+    loadData(loggedInUser.studentId);
     setIsDataLoaded(true);
   };
 
