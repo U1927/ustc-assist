@@ -63,7 +63,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     }
 
     if (!json) {
-        alert("❌ 提取失败！\n请确认：\n1. 您已登录教务系统\n2. 当前页面是 [学生课表查询]");
+        alert("❌ 提取失败！\\n请确认：\\n1. 您已登录教务系统\\n2. 当前页面是 [学生课表查询]");
         return;
     }
 
@@ -81,7 +81,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     }
     
     console.log("%c✅ 数据已复制！", "color:green; font-weight:bold; font-size:16px;");
-    alert("✅ 课表数据已复制！\n\n请回到 USTC Assistant，在 [方式三：直接粘贴] 中粘贴。");
+    alert("✅ 课表数据已复制！\\n\\n请回到 USTC Assistant，在 [方式三：直接粘贴] 中粘贴。");
 
   } catch (e) {
     console.error(e);
@@ -229,7 +229,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                       <Shield size={20} className="text-yellow-600 flex-shrink-0 mt-0.5"/>
                       <div className="text-xs text-yellow-800">
                         <p className="font-bold">后端代理模式</p>
-                        <p>服务器将模拟浏览器行为：登录 CAS -> 跳转 JW -> 正则提取源码。适合不方便使用控制台的用户。</p>
+                        <p>服务器将模拟浏览器行为：登录 CAS &rarr; 跳转 JW &rarr; 正则提取源码。适合不方便使用控制台的用户。</p>
                       </div>
                    </div>
                    
