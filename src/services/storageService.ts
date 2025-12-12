@@ -1,9 +1,10 @@
-
 import { ScheduleItem, TodoItem, UserProfile } from '../types';
 import { supabase } from '../lib/supabase';
 
 const KEYS = {
   USER_SESSION: 'ustc_assist_user_session',
+  SCHEDULE: 'ustc_assist_schedule',
+  TODOS: 'ustc_assist_todos',
 };
 
 // --- Session (Local Only) ---
@@ -18,6 +19,25 @@ export const getUserSession = (): UserProfile | null => {
 
 export const clearSession = () => {
   localStorage.clear();
+};
+
+// --- Local Data Persistence ---
+export const saveSchedule = (items: ScheduleItem[]) => {
+  localStorage.setItem(KEYS.SCHEDULE, JSON.stringify(items));
+};
+
+export const getSchedule = (): ScheduleItem[] => {
+  const data = localStorage.getItem(KEYS.SCHEDULE);
+  return data ? JSON.parse(data) : [];
+};
+
+export const saveTodos = (items: TodoItem[]) => {
+  localStorage.setItem(KEYS.TODOS, JSON.stringify(items));
+};
+
+export const getTodos = (): TodoItem[] => {
+  const data = localStorage.getItem(KEYS.TODOS);
+  return data ? JSON.parse(data) : [];
 };
 
 // --- Cloud Operations (Supabase) ---
