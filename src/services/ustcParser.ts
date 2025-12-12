@@ -1,111 +1,102 @@
 
-import { ScheduleItem, SemesterConfig } from '../types';
+import { ScheduleItem } from '../types';
 import { USTC_TIME_SLOTS, calculateClassDate } from './utils';
 import { format } from 'date-fns';
 
 /**
- * Parsing logic for USTC JW System Data.
- * Matches the JSON structure typically returned by /for-std/course-table/get-data
+ * 解析从教务系统提取的 JSON 数据
+ * 兼容 `studentTableVm` 对象结构
  */
-
-interface JwLesson {
-  id?: string;
-  courseName?: string;
-  nameZh?: string;
-  course?: { nameZh: string };
-  classroom?: { name: string };
-  teacherAssignmentList?: Array<{ teacher?: { name?: string }, name?: string }>;
-  teachers?: Array<{ name: string }>;
-  weeks?: number[];
-  weekIndex?: number;
-  weekday?: number;
-  startUnit?: number;
-  endUnit?: number;
-}
-
-export const parseJwJson = (input: string | any, semesterStart: string): ScheduleItem[] => {
+export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] => {
+  const scheduleItems: ScheduleItem[] = [];
+  
   try {
-    let data: any;
+    // 1. 确定数据源结构
+    let lessons: any[] = [];
+    let secondClass: any[] = [];
 
-    // Handle both string input (from manual paste) and object input (from API)
-    if (typeof input === 'string') {
-        try {
-            data = JSON.parse(input.trim());
-        } catch (e) {
-            throw new Error("Invalid JSON format. Please check your input.");
-        }
-    } else {
-        data = input;
+    // 如果是后端代理返回的组合数据
+    if (input.firstClassroom) {
+        lessons = Array.isArray(input.firstClassroom) ? input.firstClassroom : [];
+        secondClass = Array.isArray(input.secondClassroom) ? input.secondClassroom : [];
+    } 
+    // 如果是用户手动粘贴的 studentTableVm 对象
+    else if (input.activities) {
+        lessons = input.activities;
+    } else if (input.lessons) {
+        lessons = input.lessons;
+    }
+    // 如果是用户手动粘贴的 activities 数组
+    else if (Array.isArray(input)) {
+        lessons = input;
     }
 
-    // Locate the Lessons Array
-    let lessons: JwLesson[] = [];
+    console.log(`[Parser] Found ${lessons.length} lessons to parse.`);
 
-    if (Array.isArray(data)) {
-      lessons = data;
-    } else if (data.studentTableVm && Array.isArray(data.studentTableVm.activities)) {
-      lessons = data.studentTableVm.activities;
-    } else if (data.studentTableVm && Array.isArray(data.studentTableVm.lessons)) {
-        lessons = data.studentTableVm.lessons;
-    } else if (data.lessons && Array.isArray(data.lessons)) {
-      lessons = data.lessons;
-    } else if (data.activities && Array.isArray(data.activities)) {
-      lessons = data.activities;
-    } else {
-      throw new Error("Could not find course list in data structure.");
-    }
-
-    const scheduleItems: ScheduleItem[] = [];
-
+    // 2. 解析第一课堂 (JW)
     lessons.forEach((lesson) => {
-      // A. Extract Basic Info
-      const title = lesson.courseName || lesson.nameZh || lesson.course?.nameZh || "Unknown Course";
+      // 字段映射：教务系统不同接口返回的字段名可能不同
+      const title = lesson.courseName || lesson.nameZh || lesson.name || "Unknown Course";
+      const location = lesson.classroom?.name || lesson.room?.name || lesson.roomName || "TBD";
       
-      let location = "TBD";
-      if (lesson.classroom?.name) location = lesson.classroom.name;
-      
-      let teachers = "";
-      if (lesson.teacherAssignmentList && lesson.teacherAssignmentList.length > 0) {
-        teachers = lesson.teacherAssignmentList.map(t => t.teacher?.name || t.name).join(", ");
-      } else if (lesson.teachers && lesson.teachers.length > 0) {
-         teachers = lesson.teachers.map(t => t.name).join(", ");
+      // 提取教师
+      let teacherName = "";
+      if (lesson.teachers && Array.isArray(lesson.teachers)) {
+          teacherName = lesson.teachers.map((t: any) => t.name).join(',');
+      } else if (lesson.teacherAssignmentList && Array.isArray(lesson.teacherAssignmentList)) {
+          teacherName = lesson.teacherAssignmentList.map((t: any) => t.teacher?.name || t.name).join(',');
       }
 
-      // B. Extract Time Info
+      // 时间信息
+      // `weeks`: [1, 2, 3...]
+      // `weekday`: 1-7
+      // `startUnit`: 1 (第1节)
       const weeks = lesson.weeks || [];
-      const weekday = lesson.weekday || lesson.weekIndex || 1;
-      const startUnit = lesson.startUnit;
-      const endUnit = lesson.endUnit;
+      const weekday = lesson.weekday || lesson.dayOfWeek;
+      const startUnit = lesson.startUnit || lesson.startPeriod;
+      const endUnit = lesson.endUnit || lesson.endPeriod;
 
-      if (weeks.length === 0 || !startUnit || !endUnit) return;
+      if (!weeks.length || !weekday || !startUnit || !endUnit) return;
 
-      // C. Generate Events
-      weeks.forEach((week) => {
-        const startTimeConfig = USTC_TIME_SLOTS[startUnit];
-        const endTimeConfig = USTC_TIME_SLOTS[endUnit];
+      weeks.forEach((week: number) => {
+         const startConf = USTC_TIME_SLOTS[startUnit];
+         const endConf = USTC_TIME_SLOTS[endUnit];
+         
+         if (startConf && endConf) {
+             const startDt = calculateClassDate(semesterStart, week, weekday, startConf.start);
+             const endDt = calculateClassDate(semesterStart, week, weekday, endConf.end);
 
-        if (!startTimeConfig || !endTimeConfig) return;
-
-        const startDt = calculateClassDate(semesterStart, week, weekday, startTimeConfig.start);
-        const endDt = calculateClassDate(semesterStart, week, weekday, endTimeConfig.end);
-
-        scheduleItems.push({
-          id: crypto.randomUUID(),
-          title: title,
-          location: location,
-          type: 'course',
-          startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
-          endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
-          description: teachers ? `Instructor: ${teachers}` : undefined,
-          textbook: undefined
-        });
+             scheduleItems.push({
+                 id: crypto.randomUUID(),
+                 title: title,
+                 location: location,
+                 type: 'course',
+                 startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
+                 endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
+                 description: teacherName ? `Teacher: ${teacherName}` : undefined,
+                 textbook: '' // 教务系统通常不返回教材信息
+             });
+         }
       });
     });
 
-    return scheduleItems;
+    // 3. 解析第二课堂 (Simple Mapping)
+    secondClass.forEach((evt) => {
+         scheduleItems.push({
+             id: crypto.randomUUID(),
+             title: evt.name || "Second Classroom Event",
+             location: evt.place || "TBD",
+             type: 'activity',
+             startTime: format(new Date(evt.startTime), "yyyy-MM-dd'T'HH:mm:ss"),
+             endTime: format(new Date(evt.endTime), "yyyy-MM-dd'T'HH:mm:ss"),
+             description: evt.description || "Imported from Young"
+         });
+    });
 
-  } catch (err: any) {
-    console.error("JW Parsing Logic Error:", err);
-    throw new Error(err.message || "Failed to parse schedule data.");
+  } catch (e) {
+      console.error("Parse Error:", e);
+      throw new Error("解析数据失败，请确认 JSON 格式是否正确");
   }
+
+  return scheduleItems;
 };
