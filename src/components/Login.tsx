@@ -1,15 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { validateStudentId } from '../services/utils';
-import { UserProfile, ScheduleItem } from '../types';
+import { UserProfile } from '../types';
 import { BookOpen, ShieldCheck, Loader2, Database, Server, UserPlus, LogIn } from 'lucide-react';
 import * as Storage from '../services/storageService';
 import * as Crawler from '../services/crawlerService';
-import * as UstcParser from '../services/ustcParser';
 import * as Utils from '../services/utils';
 
 interface LoginProps {
-  onLogin: (user: UserProfile, initialEvents?: ScheduleItem[]) => void;
+  onLogin: (user: UserProfile, rawSyncData?: any) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
@@ -20,7 +19,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
 
-  // Captcha State for Crawler
+  // Captcha State for Crawler verification
   const [captchaImg, setCaptchaImg] = useState('');
   const [captchaCode, setCaptchaCode] = useState('');
   const [loginContext, setLoginContext] = useState<any>(null);
@@ -38,7 +37,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validation
     if (!validateStudentId(studentId)) {
       setError('Invalid ID format. Ex: PB20000001');
       return;
@@ -63,8 +61,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     } catch (err: any) {
       console.error("Auth Error:", err);
       setError(err.message || "Operation failed.");
-      
-      // Clear captcha state if it's not a captcha error
       if (!err.message.includes('code') && !err.message.includes('Security')) {
         setCaptchaImg('');
         setLoginContext(null);
@@ -80,17 +76,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     if (dbResult.success) {
       console.log("[Login] Database login successful.");
-      setStatusText('Syncing Data...');
-      const cloudData = await Storage.fetchUserData(cleanId);
-      completeLogin(cleanId, cloudData?.schedule || []);
+      completeLogin(cleanId);
     } else {
-      // Handle explicit "Not Found" case
       if (dbResult.error && (dbResult.error.includes("not found") || dbResult.error.includes("register"))) {
-        setError("Account does not exist.");
-        // Suggest switching to register
-        // We throw a specific error or just let the UI show the error. 
-        // User asked to be REMINDED to register.
-        throw new Error("Account not found. Please switch to 'Register' to create a new account.");
+        setError("Account not found.");
+        throw new Error("Account not found. Please register.");
       } else {
         throw new Error(dbResult.error || "Login Failed");
       }
@@ -98,33 +88,23 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   const processRegister = async (cleanId: string) => {
-    // 1. Verify credentials via USTC Crawler
-    setStatusText('Verifying with USTC...');
+    // 1. Verify credentials via USTC Proxy (Authentication Only)
+    setStatusText('Verifying Identity...');
+    // We still call the crawler to verify the password against CAS
     const crawlResult = await Crawler.autoImportFromJw(cleanId, password, captchaCode, loginContext);
 
     if (crawlResult.requireCaptcha) {
       setCaptchaImg(crawlResult.captchaImage);
       setLoginContext(crawlResult.context);
       setStatusText('Security Check');
-      setIsLoading(false); // Stop loading to let user input code
-      // We throw here to stop execution flow, but we handled the UI state above
+      setIsLoading(false); 
       return; 
     }
 
-    // 2. Parse Initial Data
-    setStatusText('Creating Account...');
-    const semesterStart = Utils.getSemesterDefaultStartDate();
-    let initialEvents: ScheduleItem[] = [];
-    try {
-        initialEvents = UstcParser.parseJwJson(crawlResult, semesterStart);
-    } catch (e) {
-        console.warn("Failed to parse initial schedule, proceeding with empty schedule.");
-    }
-
-    // 3. Create DB Account
+    // 2. Create DB Account
+    setStatusText('Creating Profile...');
     const regResult = await Storage.registerUser(cleanId, password);
     if (!regResult.success) {
-      // If user already exists (race condition), try logging in
       if (regResult.error?.includes("already exists")) {
          await processLogin(cleanId); 
          return;
@@ -132,14 +112,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       throw new Error("Registration Failed: " + regResult.error);
     }
 
-    // 4. Save Initial Data
-    await Storage.saveUserData(cleanId, initialEvents, []);
-
-    // 5. Complete
-    completeLogin(cleanId, initialEvents);
+    // 3. Complete - Pass the raw crawl result to App for background processing
+    // Login UI does NOT parse it.
+    completeLogin(cleanId, crawlResult);
   };
 
-  const completeLogin = (id: string, events: ScheduleItem[]) => {
+  const completeLogin = (id: string, rawData?: any) => {
       onLogin({
         studentId: id,
         name: `Student ${id}`,
@@ -153,7 +131,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
              totalWeeks: 18
           }
         }
-      }, events);
+      }, rawData);
   };
 
   return (
@@ -184,7 +162,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
              onClick={() => setMode('register')}
              className={`flex-1 pb-2 text-sm font-bold transition ${mode === 'register' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
            >
-             Register / Sync
+             Register
            </button>
         </div>
 
@@ -213,7 +191,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             />
           </div>
 
-          {/* Captcha Section (Dynamic) */}
+          {/* Captcha Section */}
           {captchaImg && (
              <div className="animate-in fade-in slide-in-from-top-2">
                 <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider text-red-600">Verification Code</label>
@@ -223,7 +201,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       alt="Captcha" 
                       className="h-9 rounded border bg-white cursor-pointer" 
                       onClick={() => setError('Please click button to refresh.')}
-                      title="Click button to retry if image is broken"
                     />
                     <input 
                       type="text" 
@@ -243,7 +220,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                  <ShieldCheck size={14} /> 
                  <span>{error}</span>
               </div>
-              {/* Suggest Registration if applicable */}
               {error.toLowerCase().includes("not found") && mode === 'login' && (
                   <button 
                     type="button" 
@@ -268,22 +244,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             ) : (
                 <>
                   {mode === 'login' ? <LogIn size={16}/> : <UserPlus size={16}/>}
-                  {mode === 'login' ? 'Login' : 'Verify & Register'}
+                  {mode === 'login' ? 'Login' : 'Verify & Create'}
                 </>
             )}
           </button>
         </form>
 
         <div className="mt-6 border-t border-gray-100 pt-4">
-          <div className="flex justify-center gap-4 text-xs text-gray-400">
-             <span className="flex items-center gap-1"><Database size={10}/> Database</span>
-             <span>|</span>
-             <span className="flex items-center gap-1"><Server size={10}/> CAS Proxy</span>
-          </div>
-          <p className="text-[10px] text-center text-gray-400 mt-2 leading-tight">
+          <p className="text-[10px] text-center text-gray-400 leading-tight">
              {mode === 'register' 
-               ? "Registration verifies your identity with USTC CAS and syncs your schedule automatically." 
-               : "Login with your registered student account."}
+               ? "Verifies identity with CAS. Schedule data will be synced in the background." 
+               : "Secure local login."}
           </p>
         </div>
       </div>
