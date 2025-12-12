@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Login from './components/Login';
 import CalendarView from './components/CalendarView';
 import Sidebar from './components/Sidebar';
@@ -9,6 +8,7 @@ import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings, Priority } 
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import * as UstcParser from './services/ustcParser';
+import * as Crawler from './services/crawlerService';
 import { generateStudyPlan } from './services/aiService';
 import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2, X, Clock, MapPin, BookOpen, AlignLeft } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
@@ -51,69 +51,24 @@ const App: React.FC = () => {
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
+      // Load local data on init
+      setEvents(Storage.getSchedule());
+      setTodos(Storage.getTodos());
+      setIsDataLoaded(true);
     }
   }, []);
 
-  // Separate effect for loading cloud data
+  // 2. Auto-Save Logic (Local Storage)
   useEffect(() => {
-    let isActive = true;
-
-    if (user && user.isLoggedIn) {
-      const fetchCloud = async () => {
-        if (!isActive) return;
-        setSyncStatus('syncing');
-        console.log(`[App] Loading cloud data for ${user.studentId}...`);
-        
-        const data = await Storage.fetchUserData(user.studentId);
-        
-        if (isActive) {
-          if (data) {
-            console.log(`[App] Data loaded. Events: ${data.schedule.length}, Todos: ${data.todos.length}`);
-            setEvents(data.schedule);
-            setTodos(data.todos);
-            setIsDataLoaded(true); 
-            setSyncStatus('idle');
-          } else {
-            console.warn("[App] Failed to load data. Starting with empty state.");
-            setIsDataLoaded(true); 
-            setSyncStatus('error');
-          }
-        }
-      };
-      
-      fetchCloud();
-    }
-
-    return () => { isActive = false; };
-  }, [user?.studentId]);
-
-  // 2. Auto-Save Logic
-  useEffect(() => {
-    let isActive = true;
     if (!user || !isDataLoaded) return;
-
-    const timeoutId = setTimeout(async () => {
-      if (!isActive) return;
-      setSyncStatus('syncing');
-      
-      const result = await Storage.saveUserData(user.studentId, events, todos);
-      
-      if (isActive) {
-          if (result.success) {
-            setSyncStatus('saved');
-            setTimeout(() => { if(isActive) setSyncStatus('idle'); }, 2000);
-          } else {
-            setSyncStatus('error');
-          }
-      }
-    }, 500);
+    Storage.saveSchedule(events);
+    Storage.saveTodos(todos);
+    
+    // Optional: Cloud sync here if using supabase
+    setSyncStatus('saved');
+    setTimeout(() => setSyncStatus('idle'), 2000);
 
     setConflicts(Utils.getConflicts(events));
-    
-    return () => {
-      clearTimeout(timeoutId);
-      isActive = false;
-    };
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session
@@ -139,17 +94,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [events, user]);
 
-  const handleForceSync = async () => {
-    if (!user) return;
-    const result = await Storage.saveUserData(user.studentId, events, todos);
-    if (result.success) alert("Manual Sync Successful!");
-    else alert(`Manual Sync Failed: ${result.error}`);
-  };
-
-  const handleChangePassword = async (oldPass: string, newPass: string) => {
-    if (!user) return { success: false, error: "Not logged in" };
-    return await Storage.changePassword(user.studentId, oldPass, newPass);
-  };
 
   const handleImportJson = (jsonStr: string) => {
     if (!user?.settings.semester?.startDate) {
@@ -181,16 +125,25 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = (loggedInUser: UserProfile) => {
+  // Login Handler - Now accepts initialEvents fetched during login
+  const handleLogin = (loggedInUser: UserProfile, initialEvents: ScheduleItem[] = []) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
+    
+    if (initialEvents.length > 0) {
+        setEvents(initialEvents); // Set the fetched schedule immediately
+    } else {
+        // Fallback: load existing local schedule if any
+        setEvents(Storage.getSchedule());
+    }
+    setTodos(Storage.getTodos());
+    setIsDataLoaded(true);
   };
 
   const handleLogout = () => {
     setUser(null);
-    Storage.clearSession();
-    setIsDataLoaded(false);
-    setEvents([]);
+    Storage.clearSession(); // Clear session
+    // Optional: Clear data or keep it? Usually keep on device is fine, but clearing session ensures login prompt
     window.location.reload();
   };
 
@@ -234,21 +187,17 @@ const App: React.FC = () => {
     const newItems: ScheduleItem[] = [];
     const semesterStart = user.settings.semester.startDate;
 
-    // Iterate weeks
     for (let w = courseForm.weekStart; w <= courseForm.weekEnd; w++) {
         courseForm.schedule.forEach(slot => {
-             // Find time slots
              const periods = slot.periods.split('-').map(Number);
              const startPeriod = periods[0];
              const endPeriod = periods[periods.length - 1];
-
              const startConfig = Utils.USTC_TIME_SLOTS[startPeriod];
              const endConfig = Utils.USTC_TIME_SLOTS[endPeriod];
 
              if (startConfig && endConfig) {
                  const startDt = Utils.calculateClassDate(semesterStart, w, slot.day, startConfig.start);
                  const endDt = Utils.calculateClassDate(semesterStart, w, slot.day, endConfig.end);
-
                  newItems.push({
                      id: crypto.randomUUID(),
                      title: courseForm.title,
@@ -325,6 +274,25 @@ const App: React.FC = () => {
      }
   };
 
+  const handleForceSync = async () => {
+    if (!user) return;
+    setSyncStatus('syncing');
+    const result = await Storage.saveUserData(user.studentId, events, todos);
+    if (result.success) {
+      setSyncStatus('saved');
+      alert('Data successfully synced to cloud!');
+    } else {
+      setSyncStatus('error');
+      alert(`Sync Failed: ${result.error}`);
+    }
+    setTimeout(() => setSyncStatus('idle'), 3000);
+  };
+
+  const handleChangePassword = async (oldPass: string, newPass: string) => {
+    if (!user) return { success: false, error: "User not authenticated" };
+    return await Storage.changePassword(user.studentId, oldPass, newPass);
+  };
+
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
@@ -386,8 +354,6 @@ const App: React.FC = () => {
 
              <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100">
                <span className="font-mono font-bold text-gray-700">{user.studentId}</span>
-               {/* <span className="w-px h-3 bg-gray-300 mx-1"></span>
-               <span className="font-medium max-w-[100px] truncate">{user.name}</span> */}
              </div>
              
              <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition active:scale-95">
