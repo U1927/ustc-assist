@@ -52,7 +52,6 @@ const App: React.FC = () => {
     const savedUser = Storage.getUserSession();
     if (savedUser && savedUser.isLoggedIn) {
       setUser(savedUser);
-      // We rely on handleLogin/Login component to load fresh data, but if session persists:
       loadData(savedUser.studentId);
     }
   }, []);
@@ -65,7 +64,7 @@ const App: React.FC = () => {
       setTodos(localTodos);
       setIsDataLoaded(true);
 
-      // Try Cloud Sync
+      // Background Cloud Sync
       setSyncStatus('syncing');
       const cloudData = await Storage.fetchUserData(studentId);
       if (cloudData) {
@@ -80,12 +79,9 @@ const App: React.FC = () => {
   // 2. Auto-Save Logic (Local & Cloud)
   useEffect(() => {
     if (!user || !isDataLoaded) return;
-    
-    // Local
     Storage.saveSchedule(events);
     Storage.saveTodos(todos);
 
-    // Debounced Cloud Save
     const timeoutId = setTimeout(async () => {
         setSyncStatus('syncing');
         const res = await Storage.saveUserData(user.studentId, events, todos);
@@ -121,10 +117,7 @@ const App: React.FC = () => {
   }, [events, user]);
 
   const handleImportJson = (jsonStr: string) => {
-    if (!user?.settings.semester?.startDate) {
-      alert("Please check your semester start date in settings before importing.");
-      return;
-    }
+    if (!user?.settings.semester?.startDate) return;
     try {
       const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
       if (newItems.length === 0) { alert("No valid courses found."); return; }
@@ -140,22 +133,26 @@ const App: React.FC = () => {
     } catch (e: any) { alert(`Failed: ${e.message}`); }
   };
 
-  // Updated Login Handler to accept initial data from Login component
-  const handleLogin = (loggedInUser: UserProfile, initialEvents: ScheduleItem[] = []) => {
+  // Handle Login Logic - receive rawSyncData if just registered
+  const handleLogin = (loggedInUser: UserProfile, rawSyncData?: any) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
     
-    // If login provided data (e.g. from crawler or initial DB fetch), use it
-    if (initialEvents.length > 0) {
-        setEvents(initialEvents);
-        // Also fetch Todos since login might only give schedule
-        Storage.fetchUserData(loggedInUser.studentId).then(data => {
-            if (data?.todos) setTodos(data.todos);
-        });
+    // If we have raw data from registration, process it HERE, in the App context
+    if (rawSyncData && loggedInUser.settings.semester.startDate) {
+        try {
+            console.log("[App] Processing initial sync data...");
+            const initialEvents = UstcParser.parseJwJson(rawSyncData, loggedInUser.settings.semester.startDate);
+            setEvents(initialEvents);
+            Storage.saveUserData(loggedInUser.studentId, initialEvents, []); // Save to cloud immediately
+        } catch (e) {
+            console.error("[App] Failed to parse initial data:", e);
+        }
     } else {
-        // Fallback
+        // Normal login, fetch from DB
         loadData(loggedInUser.studentId);
     }
+    
     setIsDataLoaded(true);
   };
 
@@ -386,7 +383,6 @@ const App: React.FC = () => {
          onImport={handleImportJson}
       />
 
-      {/* Event Popover */}
       {selectedEvent && (
          <div className="fixed inset-0 bg-black/20 z-40 flex items-center justify-center backdrop-blur-sm" onClick={() => setSelectedEvent(null)}>
             <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
@@ -408,7 +404,6 @@ const App: React.FC = () => {
          </div>
       )}
 
-      {/* Add Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
