@@ -8,7 +8,7 @@ import * as Crawler from '../services/crawlerService';
 import * as Utils from '../services/utils';
 
 interface LoginProps {
-  onLogin: (user: UserProfile, rawSyncData?: any) => void;
+  onLogin: (user: UserProfile) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
@@ -88,14 +88,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   const processRegister = async (cleanId: string) => {
-    // 1. Verify credentials via USTC Proxy (Authentication Only)
+    // 1. Verify credentials via USTC Proxy (Authentication Only - NO DATA FETCH)
     setStatusText('Verifying Identity...');
-    // We still call the crawler to verify the password against CAS
-    const crawlResult = await Crawler.autoImportFromJw(cleanId, password, captchaCode, loginContext);
+    const result = await Crawler.verifyCredential(cleanId, password, captchaCode, loginContext);
 
-    if (crawlResult.requireCaptcha) {
-      setCaptchaImg(crawlResult.captchaImage);
-      setLoginContext(crawlResult.context);
+    if (result.requireCaptcha) {
+      setCaptchaImg(result.captchaImage);
+      setLoginContext(result.context);
       setStatusText('Security Check');
       setIsLoading(false); 
       return; 
@@ -112,12 +111,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       throw new Error("Registration Failed: " + regResult.error);
     }
 
-    // 3. Complete - Pass the raw crawl result to App for background processing
-    // Login UI does NOT parse it.
-    completeLogin(cleanId, crawlResult);
+    // 3. Complete
+    completeLogin(cleanId);
   };
 
-  const completeLogin = (id: string, rawData?: any) => {
+  const completeLogin = (id: string) => {
       onLogin({
         studentId: id,
         name: `Student ${id}`,
@@ -131,7 +129,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
              totalWeeks: 18
           }
         }
-      }, rawData);
+      });
   };
 
   return (
@@ -253,7 +251,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         <div className="mt-6 border-t border-gray-100 pt-4">
           <p className="text-[10px] text-center text-gray-400 leading-tight">
              {mode === 'register' 
-               ? "Verifies identity with CAS. Schedule data will be synced in the background." 
+               ? "Identity verification only. Course data can be imported later." 
                : "Secure local login."}
           </p>
         </div>
