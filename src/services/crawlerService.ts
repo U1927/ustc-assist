@@ -8,57 +8,48 @@ export const autoImportFromJw = async (
   context?: any
 ): Promise<any> => {
   try {
-    const payload: any = { username, password: pass };
+    const payload: any = { 
+        username, 
+        password: pass,
+        includeSecondClassroom: true // Request Second Classroom (Young) Data
+    };
     if (captchaCode) payload.captchaCode = captchaCode;
     if (context) payload.context = context;
 
-    // Note: On Vercel, this requests /api/jw/login
+    // Use relative path which is proxied by Vite to the backend server
     const response = await fetch('/api/jw/login', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
-    if (response.status === 404) {
-      throw new Error("API Endpoint Not Found. Ensure 'api/jw/login.js' is deployed.");
-    }
-    
-    if (response.status === 504) {
-       throw new Error("Request Timed Out. CAS might be slow.");
-    }
+    if (response.status === 404) throw new Error("Backend API Not Found. Ensure server.js is running.");
+    if (response.status === 504) throw new Error("Request Timed Out.");
 
     const text = await response.text();
-    if (!text) {
-      throw new Error(`Server returned empty response (Status: ${response.status})`);
-    }
+    if (!text) throw new Error(`Empty response from server.`);
 
     let result;
     try {
       result = JSON.parse(text);
     } catch (e) {
-      throw new Error(`Server Error: Received invalid format (Status ${response.status}).`);
+      throw new Error(`Invalid JSON response: ${text.substring(0, 50)}...`);
     }
 
-    // Special Case: Captcha Required (Not an error, but a step)
-    if (result.requireCaptcha) {
-        return result; // Return the whole object so frontend can handle it
-    }
+    if (result.requireCaptcha) return result;
 
     if (!response.ok || !result.success) {
-      let errorMsg = result.error || 'Login failed';
-      // Append Debug HTML using the special separator if available
-      if (result.debugHtml) {
-          errorMsg += `DebugHtml:${result.debugHtml}`;
-      }
-      throw new Error(errorMsg);
+      throw new Error(result.error || 'Login failed');
     }
 
-    // result.data contains the JW JSON
-    return result.data;
+    return result.data; // Now contains { firstClassroom, secondClassroom }
   } catch (error: any) {
     console.error('Auto Import Error:', error);
     throw new Error(error.message || "Network Error");
   }
+};
+
+// Legacy mock function - kept for compatibility if referenced elsewhere
+export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
+  return [];
 };
