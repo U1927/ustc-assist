@@ -91,7 +91,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { username, password, captchaCode, context } = req.body;
+  const { username, password, captchaCode, context, mode } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, error: '请输入账号和密码' });
 
   // 1. CAS Login Entry
@@ -152,7 +152,19 @@ export default async function handler(req, res) {
          return res.status(401).json({ success: false, error: msg });
     }
 
+    // ============================================================
+    // CRITICAL CHANGE: Authentication Only Mode
+    // If user just wants to verify identity (register), stop here!
+    // ============================================================
+    if (mode === 'auth') {
+        console.log(`[API] Auth success for ${username}. Mode is 'auth', skipping data fetch.`);
+        return res.json({ success: true, message: "身份验证通过" });
+    }
+
+
     // --- STEP 3: JW (First Classroom) ---
+    // Only proceed if mode is NOT 'auth' (default or 'fetch')
+    
     // Follow redirect to jw.ustc.edu.cn to establish session
     const jwResult = await followRedirects(CAS_LOGIN_URL, sessionCookies); 
     const jwHtml = jwResult.html;
@@ -179,40 +191,28 @@ export default async function handler(req, res) {
     let youngData = [];
     try {
         console.log("Attempting to fetch Second Classroom data...");
-        // 4.1 Trigger CAS Login for Young Service
-        // 关键点：我们使用同一个 sessionCookies (包含 CASTGC) 去请求第二课堂的 CAS 入口
         const youngService = 'http://young.ustc.edu.cn/uaa/cas/login';
         const youngCasUrl = `https://passport.ustc.edu.cn/login?service=${encodeURIComponent(youngService)}`;
         
-        // 这一步会发生：passport验证 -> 302跳转 -> young.ustc.edu.cn -> 设置 young 的 JSESSIONID
         const youngLoginResult = await followRedirects(youngCasUrl, sessionCookies);
         const youngCookies = youngLoginResult.cookies; 
 
-        // 4.2 Fetch Activity List Page
-        // 假设第二课堂列表页地址 (这是通常的地址，如果 USTC 改版了可能需要调整)
         const youngScheduleUrl = 'http://young.ustc.edu.cn/bg/activity/my-activity-list'; 
         const youngRes = await axios.get(youngScheduleUrl, {
             headers: { ...HEADERS, 'Cookie': youngCookies }
         });
 
-        // 4.3 Parse Young Data (Real HTML Parsing)
         const $young = cheerio.load(youngRes.data);
-        
-        // 尝试解析表格 (通用逻辑：寻找包含"活动"、"时间"等关键字的表格)
-        // 通常结构是 <table><thead>...</thead><tbody><tr>...</tr></tbody></table>
         const rows = $young('table tbody tr');
         
         if (rows.length > 0) {
             rows.each((i, el) => {
                 const cols = $young(el).find('td');
-                // 假设列顺序：名称 | 地点 | 开始时间 | 结束时间 (需根据实际页面调整下标)
-                // 这里做一个宽泛的提取，实际部署时需对着真实 HTML 微调
                 if (cols.length >= 3) {
-                    const name = $(cols[0]).text().trim(); // 假设第一列是名字
-                    const timeStr = $(cols[1]).text().trim() || $(cols[2]).text().trim(); // 寻找包含时间的列
-                    const place = $(cols[2]).text().trim() || $(cols[3]).text().trim(); // 寻找地点
+                    const name = $(cols[0]).text().trim(); 
+                    const timeStr = $(cols[1]).text().trim() || $(cols[2]).text().trim(); 
+                    const place = $(cols[2]).text().trim() || $(cols[3]).text().trim(); 
 
-                    // 简单的时间提取正则 (YYYY-MM-DD HH:mm)
                     const timeMatch = timeStr.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g);
                     let start = '', end = '';
                     if (timeMatch && timeMatch.length >= 1) start = timeMatch[0];
@@ -223,43 +223,22 @@ export default async function handler(req, res) {
                             name: name,
                             place: place,
                             startTime: start,
-                            endTime: end || start, // 如果没有结束时间，暂定同开始时间
+                            endTime: end || start, 
                             description: "From Second Classroom (Parsed)"
                         });
                     }
                 }
             });
         } 
-        
-        // 如果解析为空（可能是页面结构不对，或者是 JSON 接口），尝试 JSON 解析
         if (youngData.length === 0 && typeof youngRes.data === 'object') {
              youngData = youngRes.data.rows || youngRes.data; 
         }
 
-        // 如果真的什么都没抓到，且页面访问成功了，这里为了演示不报错，保留一条 Mock 数据作为提示
-        // 实际生产环境应移除 Mock
-        if (youngData.length === 0 && youngRes.status === 200) {
-            console.log("Young page accessed but no data parsed. Using fallback.");
-            youngData.push({
-                name: "【第二课堂】数据同步成功 (暂无活动)",
-                place: "系统",
-                startTime: new Date().toISOString(),
-                endTime: new Date().toISOString(),
-                description: "已成功连接第二课堂，但未解析到具体活动列表。"
-            });
-        }
-
     } catch (e) {
         console.error("Second Classroom Fetch Failed:", e.message);
-        // Do not fail the whole request if only Second Classroom fails
     }
 
-    if (!jwData) {
-        return res.status(500).json({ 
-            success: false, 
-            error: "登录成功，但第一课堂数据提取失败 (Regex Mismatch)。" 
-        });
-    }
+    if (!jwData) jwData = [];
 
     return res.json({
         success: true,
