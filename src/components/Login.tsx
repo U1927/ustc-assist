@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { validateStudentId } from '../services/utils';
 import { UserProfile, ScheduleItem } from '../types';
-import { BookOpen, ShieldCheck, ExternalLink, Loader2, Database, Server } from 'lucide-react';
+import { BookOpen, ShieldCheck, Loader2, Database, Server, UserPlus, LogIn } from 'lucide-react';
 import * as Storage from '../services/storageService';
 import * as Crawler from '../services/crawlerService';
 import * as UstcParser from '../services/ustcParser';
@@ -13,11 +13,12 @@ interface LoginProps {
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [studentId, setStudentId] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [statusText, setStatusText] = useState('Login');
+  const [statusText, setStatusText] = useState('');
 
   // Captcha State for Crawler
   const [captchaImg, setCaptchaImg] = useState('');
@@ -27,7 +28,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const isMounted = useRef(true);
   useEffect(() => { return () => { isMounted.current = false; }; }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Clear error when switching modes
+  useEffect(() => {
+    setError('');
+    setCaptchaImg('');
+    setCaptchaCode('');
+  }, [mode]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     // Validation
@@ -42,80 +50,93 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     setIsLoading(true);
     setError('');
-    setStatusText('Checking Database...');
-    setCaptchaImg(''); // Clear previous captcha
+    setCaptchaImg('');
+    
+    const cleanId = studentId.toUpperCase().trim();
 
     try {
-        const cleanId = studentId.toUpperCase().trim();
-
-        // 1. First, attempt to login to Cloud Database (Supabase)
-        // This preserves the "Original Login Method" preference
-        const dbResult = await Storage.loginUser(cleanId, password);
-
-        if (dbResult.success) {
-            // --- SCENARIO A: User exists in DB ---
-            console.log("[Login] Database login successful.");
-            setStatusText('Syncing Data...');
-            
-            // Fetch User Data from DB
-            const cloudData = await Storage.fetchUserData(cleanId);
-            
-            completeLogin(cleanId, cloudData?.schedule || []);
-            return;
-        } 
-        
-        // 2. If user NOT found in DB, we try to "Auto-Register" via USTC Login
-        if (dbResult.error && dbResult.error.includes("not found")) {
-            console.log("[Login] User not in DB. Attempting USTC Proxy Login...");
-            setStatusText('Verifying with USTC...');
-
-            // Call Crawler to verify credentials against real JW system
-            const crawlResult = await Crawler.autoImportFromJw(cleanId, password, captchaCode, loginContext);
-
-            // Handle Captcha Case
-            if (crawlResult.requireCaptcha) {
-                setCaptchaImg(crawlResult.captchaImage);
-                setLoginContext(crawlResult.context);
-                setError("Security Check Required from USTC");
-                setIsLoading(false);
-                setStatusText('Login');
-                return;
-            }
-
-            // --- SCENARIO B: USTC Login Success (First Time User) ---
-            setStatusText('Registering...');
-            
-            // Parse initial data
-            const semesterStart = Utils.getSemesterDefaultStartDate();
-            const initialEvents = UstcParser.parseJwJson(crawlResult, semesterStart);
-
-            // Register in Database
-            const regResult = await Storage.registerUser(cleanId, password);
-            if (!regResult.success) {
-                throw new Error("Registration Failed: " + regResult.error);
-            }
-
-            // Save initial fetched data to Database
-            await Storage.saveUserData(cleanId, initialEvents, []);
-
-            completeLogin(cleanId, initialEvents);
-            return;
-        }
-
-        // 3. If password was wrong for DB
-        throw new Error(dbResult.error || "Login Failed");
-
+      if (mode === 'login') {
+        await processLogin(cleanId);
+      } else {
+        await processRegister(cleanId);
+      }
     } catch (err: any) {
-        console.error("Login Error", err);
-        setError(err.message || "Connection Error");
-        // Don't clear captcha context if it's a captcha error, otherwise clear it
-        if (!err.message.includes('code') && !err.message.includes('Security')) {
-             setCaptchaImg('');
-             setLoginContext(null);
-        }
+      console.error("Auth Error:", err);
+      setError(err.message || "Operation failed.");
+      
+      // Clear captcha state if it's not a captcha error
+      if (!err.message.includes('code') && !err.message.includes('Security')) {
+        setCaptchaImg('');
+        setLoginContext(null);
+      }
     } finally {
-        if (isMounted.current && !captchaImg) setIsLoading(false);
+      if (isMounted.current && !captchaImg) setIsLoading(false);
     }
+  };
+
+  const processLogin = async (cleanId: string) => {
+    setStatusText('Authenticating...');
+    const dbResult = await Storage.loginUser(cleanId, password);
+
+    if (dbResult.success) {
+      console.log("[Login] Database login successful.");
+      setStatusText('Syncing Data...');
+      const cloudData = await Storage.fetchUserData(cleanId);
+      completeLogin(cleanId, cloudData?.schedule || []);
+    } else {
+      // Handle explicit "Not Found" case
+      if (dbResult.error && (dbResult.error.includes("not found") || dbResult.error.includes("register"))) {
+        setError("Account does not exist.");
+        // Suggest switching to register
+        // We throw a specific error or just let the UI show the error. 
+        // User asked to be REMINDED to register.
+        throw new Error("Account not found. Please switch to 'Register' to create a new account.");
+      } else {
+        throw new Error(dbResult.error || "Login Failed");
+      }
+    }
+  };
+
+  const processRegister = async (cleanId: string) => {
+    // 1. Verify credentials via USTC Crawler
+    setStatusText('Verifying with USTC...');
+    const crawlResult = await Crawler.autoImportFromJw(cleanId, password, captchaCode, loginContext);
+
+    if (crawlResult.requireCaptcha) {
+      setCaptchaImg(crawlResult.captchaImage);
+      setLoginContext(crawlResult.context);
+      setStatusText('Security Check');
+      setIsLoading(false); // Stop loading to let user input code
+      // We throw here to stop execution flow, but we handled the UI state above
+      return; 
+    }
+
+    // 2. Parse Initial Data
+    setStatusText('Creating Account...');
+    const semesterStart = Utils.getSemesterDefaultStartDate();
+    let initialEvents: ScheduleItem[] = [];
+    try {
+        initialEvents = UstcParser.parseJwJson(crawlResult, semesterStart);
+    } catch (e) {
+        console.warn("Failed to parse initial schedule, proceeding with empty schedule.");
+    }
+
+    // 3. Create DB Account
+    const regResult = await Storage.registerUser(cleanId, password);
+    if (!regResult.success) {
+      // If user already exists (race condition), try logging in
+      if (regResult.error?.includes("already exists")) {
+         await processLogin(cleanId); 
+         return;
+      }
+      throw new Error("Registration Failed: " + regResult.error);
+    }
+
+    // 4. Save Initial Data
+    await Storage.saveUserData(cleanId, initialEvents, []);
+
+    // 5. Complete
+    completeLogin(cleanId, initialEvents);
   };
 
   const completeLogin = (id: string, events: ScheduleItem[]) => {
@@ -151,7 +172,23 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
            <p className="text-xs text-gray-500 mt-1">CAS - Central Authentication Service</p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        {/* Mode Toggle Tabs */}
+        <div className="flex border-b border-gray-200 mb-6">
+           <button 
+             onClick={() => setMode('login')}
+             className={`flex-1 pb-2 text-sm font-bold transition ${mode === 'login' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+           >
+             Login
+           </button>
+           <button 
+             onClick={() => setMode('register')}
+             className={`flex-1 pb-2 text-sm font-bold transition ${mode === 'register' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+           >
+             Register / Sync
+           </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider">Student ID</label>
             <input
@@ -159,7 +196,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={studentId}
               onChange={(e) => { setStudentId(e.target.value); setError(''); }}
               placeholder="e.g., PB20000001"
-              disabled={isLoading}
+              disabled={isLoading && !captchaImg}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
           </div>
@@ -171,7 +208,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="USTC Password"
-              disabled={isLoading}
+              disabled={isLoading && !captchaImg}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
           </div>
@@ -185,7 +222,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       src={captchaImg} 
                       alt="Captcha" 
                       className="h-9 rounded border bg-white cursor-pointer" 
-                      onClick={() => setError('Please click login to refresh.')}
+                      onClick={() => setError('Please click button to refresh.')}
+                      title="Click button to retry if image is broken"
                     />
                     <input 
                       type="text" 
@@ -200,14 +238,27 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           )}
 
           {error && (
-            <div className="text-red-500 text-xs bg-red-50 p-2.5 rounded border border-red-200 flex items-center gap-2">
-              <ShieldCheck size={14} /> {error}
+            <div className="text-red-500 text-xs bg-red-50 p-3 rounded border border-red-200 flex flex-col gap-1">
+              <div className="flex items-center gap-2 font-bold">
+                 <ShieldCheck size={14} /> 
+                 <span>{error}</span>
+              </div>
+              {/* Suggest Registration if applicable */}
+              {error.toLowerCase().includes("not found") && mode === 'login' && (
+                  <button 
+                    type="button" 
+                    onClick={() => setMode('register')}
+                    className="text-left text-blue-600 underline hover:text-blue-800 mt-1"
+                  >
+                    Click here to Register →
+                  </button>
+              )}
             </div>
           )}
 
           <button
             type="submit"
-            disabled={isLoading && !captchaImg} // Allow clicking if captcha needs refresh/submit
+            disabled={isLoading && !captchaImg} 
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded shadow-lg transform active:scale-95 transition duration-150 flex items-center justify-center gap-2"
           >
             {isLoading && !captchaImg ? (
@@ -215,19 +266,24 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                  <Loader2 size={16} className="animate-spin" /> {statusText}
                 </>
             ) : (
-                'Login'
+                <>
+                  {mode === 'login' ? <LogIn size={16}/> : <UserPlus size={16}/>}
+                  {mode === 'login' ? 'Login' : 'Verify & Register'}
+                </>
             )}
           </button>
         </form>
 
         <div className="mt-6 border-t border-gray-100 pt-4">
           <div className="flex justify-center gap-4 text-xs text-gray-400">
-             <span className="flex items-center gap-1"><Database size={10}/> Database Connected</span>
+             <span className="flex items-center gap-1"><Database size={10}/> Database</span>
              <span>|</span>
-             <span className="flex items-center gap-1"><Server size={10}/> Proxy Active</span>
+             <span className="flex items-center gap-1"><Server size={10}/> CAS Proxy</span>
           </div>
           <p className="text-[10px] text-center text-gray-400 mt-2 leading-tight">
-            Use your USTC account. First time login will automatically sync your schedule from JW system.
+             {mode === 'register' 
+               ? "Registration verifies your identity with USTC CAS and syncs your schedule automatically." 
+               : "Login with your registered student account."}
           </p>
         </div>
       </div>
