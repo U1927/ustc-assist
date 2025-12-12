@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, FileJson, Check, Terminal, ExternalLink, Copy, PlayCircle, AlertCircle, Loader2, RefreshCw, Shield, Lock, User, Eye, EyeOff } from 'lucide-react';
 import * as Crawler from '../services/crawlerService';
 
@@ -25,11 +25,17 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   // Manual JSON State
   const [jsonInput, setJsonInput] = useState('');
 
+  // Ref for mounted state
+  const isMounted = useRef(true);
+  useEffect(() => {
+     return () => { isMounted.current = false; };
+  }, []);
+
   // Script State
   const CRAWLER_SCRIPT = `
 (async () => {
   try {
-    console.log("USTC Assistant: 开始抓取...");
+    console.log("USTC Assistant: Starting crawler...");
     const html = document.body.innerHTML;
     let json = null;
     
@@ -39,7 +45,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     const semMatch = html.match(/semesterId[:\\s"']+(\\d+)/);
     
     if(!idMatch) {
-        alert("❌ 无法找到学号信息。\\n请确保您已经登录，并且处于【学生课表查询】页面。");
+        alert("❌ Cannot find Student ID.\\nPlease ensure you are logged in and on the [Student Course Table Query] page.");
         return;
     }
     
@@ -85,13 +91,13 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     }
 
     if (!json) {
-        throw new Error("无法获取数据 (API请求失败且无法从源码提取)。请尝试【手动粘贴 JSON】方式。");
+        throw new Error("Unable to retrieve data (API request failed and unable to extract from source). Please try the [Manual JSON Paste] method.");
     }
     
     // 4. Send back to App
     if (window.opener) {
         window.opener.postMessage({ type: 'USTC_DATA_IMPORT', payload: json }, '*');
-        alert("✅ 课表数据已发送至 USTC Assistant！\\n您可以关闭此窗口了。");
+        alert("✅ Schedule data sent to USTC Assistant!\\nYou can close this window now.");
     } else {
         const str = JSON.stringify(json);
         const input = document.createElement('textarea');
@@ -100,10 +106,10 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         input.select();
         document.execCommand('copy');
         document.body.removeChild(input);
-        alert("✅ 无法自动传回数据，但已复制到剪贴板！\\n请返回应用切换到【手动粘贴 JSON】标签页并粘贴。");
+        alert("✅ Unable to send data automatically, but it has been copied to your clipboard!\\nPlease return to the app, switch to the [Manual JSON Paste] tab, and paste it.");
     }
   } catch (e) {
-    alert("❌ 抓取失败: " + e.message);
+    alert("❌ Crawl failed: " + e.message);
   }
 })();
 `.trim();
@@ -113,7 +119,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
       if (event.data && event.data.type === 'USTC_DATA_IMPORT') {
         console.log("[Import] Received data via postMessage");
         onImport(event.data.payload);
-        setStatus('success');
+        if(isMounted.current) setStatus('success');
       }
     };
     window.addEventListener('message', handleMessage);
@@ -122,7 +128,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
   const handleCopyScript = () => {
     navigator.clipboard.writeText(CRAWLER_SCRIPT);
-    alert("脚本已复制！请在教务系统控制台粘贴。");
+    alert("Script copied! Please paste it in the JW System console.");
   };
 
   const handleOpenJw = () => {
@@ -147,8 +153,10 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         return;
     }
 
-    setIsLoading(true);
-    setError('');
+    if (isMounted.current) {
+        setIsLoading(true);
+        setError('');
+    }
 
     try {
         const result = await Crawler.autoImportFromJw(
@@ -160,31 +168,37 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
         // Check if Captcha is required (Intermediate Step)
         if (result.requireCaptcha) {
-            setCaptchaImg(result.captchaImage);
-            setLoginContext(result.context); // Save session state
-            setError(result.message || "Please enter the verification code.");
-            setCaptchaCode(''); // Clear previous code if any
-            setIsLoading(false);
+            if (isMounted.current) {
+                setCaptchaImg(result.captchaImage);
+                setLoginContext(result.context); // Save session state
+                setError(result.message || "Please enter the verification code.");
+                setCaptchaCode(''); // Clear previous code if any
+                setIsLoading(false);
+            }
             return;
         }
 
         // Success!
-        onImport(result);
-        setStatus('success');
+        if (isMounted.current) {
+            onImport(result);
+            setStatus('success');
+        }
         
     } catch (err: any) {
-        setError(err.message || "Import failed");
-        // Reset captcha state on error to force retry or re-login
-        if (err.message.includes('Verification') || err.message.includes('验证')) {
-             // Keep context, just clear code
-             setCaptchaCode('');
-        } else {
-             // Fatal error, reset flow
-             setCaptchaImg('');
-             setLoginContext(null);
+        if (isMounted.current) {
+            setError(err.message || "Import failed");
+            // Reset captcha state on error to force retry or re-login
+            if (err.message.includes('Verification') || err.message.includes('验证')) {
+                 // Keep context, just clear code
+                 setCaptchaCode('');
+            } else {
+                 // Fatal error, reset flow
+                 setCaptchaImg('');
+                 setLoginContext(null);
+            }
         }
     } finally {
-        setIsLoading(false);
+        if (isMounted.current) setIsLoading(false);
     }
   };
 
@@ -209,186 +223,183 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         <div className="flex border-b bg-gray-50/50">
            <button 
              onClick={() => setActiveTab('auto')}
-             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'auto' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-gray-100'}`}
+             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'auto' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-white/50'}`}
            >
-             <RefreshCw size={16}/> Auto Import
+             <RefreshCw size={14}/> Auto Sync (CAS)
            </button>
            <button 
              onClick={() => setActiveTab('script')}
-             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'script' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-gray-100'}`}
+             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'script' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-white/50'}`}
            >
-             <Terminal size={16}/> Script (Backup)
+             <Terminal size={14}/> Console Script
            </button>
            <button 
              onClick={() => setActiveTab('manual')}
-             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'manual' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-gray-100'}`}
+             className={`flex-1 py-3 text-sm font-bold transition flex items-center justify-center gap-2 ${activeTab === 'manual' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-500 hover:bg-white/50'}`}
            >
-             <Copy size={16}/> Manual JSON
+             <Copy size={14}/> JSON Paste
            </button>
         </div>
 
-        <div className="p-6 overflow-y-auto">
-          
+        {/* Content */}
+        <div className="p-6 flex-1 overflow-y-auto">
           {status === 'success' ? (
-             <div className="text-center py-10 space-y-4">
-                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Check size={32} />
+             <div className="flex flex-col items-center justify-center py-10 text-center animate-in fade-in duration-500">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
+                  <Check size={32} className="text-green-600"/>
                 </div>
                 <h3 className="text-xl font-bold text-gray-800">Import Successful!</h3>
-                <p className="text-gray-500">Your schedule has been updated.</p>
-                <button onClick={onClose} className="bg-gray-800 text-white px-6 py-2 rounded-lg hover:bg-gray-900 transition">Done</button>
+                <p className="text-gray-500 text-sm mt-2 max-w-xs">Your schedule has been synchronized. You can close this window now.</p>
+                <button onClick={onClose} className="mt-6 bg-gray-100 hover:bg-gray-200 text-gray-700 px-6 py-2 rounded-full text-sm font-bold transition">
+                   Close
+                </button>
              </div>
-          ) : activeTab === 'auto' ? (
-             <div className="space-y-6 max-w-sm mx-auto">
-                <div className="text-center mb-4">
-                   <div className="inline-flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full text-blue-600 mb-2">
-                      <Lock size={20} />
-                   </div>
-                   <h3 className="text-gray-800 font-bold">Unified Identity Login</h3>
-                   <p className="text-xs text-gray-400">Credentials are used once to fetch data and never stored.</p>
-                </div>
-
-                <form onSubmit={handleAutoLogin} className="space-y-4">
-                    <div className="space-y-3">
-                       <div className="relative">
-                          <User className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                          <input 
-                             type="text" 
-                             className="w-full pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                             placeholder="Student ID (e.g. PB20xxxx)"
-                             value={username}
-                             onChange={e => setUsername(e.target.value)}
-                             disabled={isLoading || !!captchaImg} // Disable ID input during captcha step
-                          />
-                       </div>
-                       
-                       {!captchaImg && (
-                           <div className="relative">
-                              <Lock className="absolute left-3 top-2.5 text-gray-400" size={16} />
-                              <input 
-                                 type={showPassword ? "text" : "password"}
-                                 className="w-full pl-10 pr-10 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                                 placeholder="Password"
-                                 value={password}
-                                 onChange={e => setPassword(e.target.value)}
-                                 disabled={isLoading}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 focus:outline-none"
-                                tabIndex={-1}
-                              >
-                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                              </button>
-                           </div>
-                       )}
-                    </div>
-
-                    {/* CAPTCHA SECTION */}
-                    {captchaImg && (
-                        <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 animate-in fade-in slide-in-from-top-2">
-                           <label className="block text-xs font-bold text-gray-600 mb-2">Security Check Required</label>
-                           <div className="flex gap-2">
-                              <img src={captchaImg} alt="Captcha" className="h-10 rounded border" />
-                              <input 
-                                 type="text" 
-                                 autoFocus
-                                 className="flex-1 border rounded px-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none uppercase"
-                                 placeholder="Enter Code"
-                                 value={captchaCode}
-                                 onChange={e => setCaptchaCode(e.target.value)}
-                              />
-                           </div>
-                        </div>
-                    )}
-
-                    {error && (
-                        <div className="text-xs text-red-600 bg-red-50 p-2 rounded flex items-start gap-2">
-                           <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
-                           <div className="max-h-24 overflow-y-auto custom-scrollbar whitespace-pre-wrap">{error}</div>
-                        </div>
-                    )}
-
-                    <button 
-                       type="submit" 
-                       disabled={isLoading}
-                       className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg shadow-md transition flex items-center justify-center gap-2"
-                    >
-                       {isLoading ? (
-                           <> <Loader2 size={18} className="animate-spin" /> {captchaImg ? 'Verifying...' : 'Connecting...'} </>
-                       ) : captchaImg ? (
-                           'Verify & Import'
-                       ) : (
-                           'Login & Import'
-                       )}
-                    </button>
-                </form>
-             </div>
-          ) : activeTab === 'script' ? (
-             <div className="space-y-6">
-                <div className="bg-orange-50 border border-orange-100 rounded-lg p-4 text-sm text-orange-800">
-                   <p className="font-bold mb-1 flex items-center gap-2"><Terminal size={16}/> Manual Fallback</p>
-                   <p className="opacity-90 text-xs leading-relaxed">
-                     If the automatic import fails (due to network blocking or CAPTCHA issues), use this script method. 
-                     It runs directly in your browser window, bypassing proxy restrictions.
-                   </p>
-                </div>
-
+          ) : (
+            <>
+              {activeTab === 'auto' && (
                 <div className="space-y-4">
-                   <div className="flex gap-4 items-start">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center flex-shrink-0">1</div>
-                      <div className="flex-1">
-                         <h4 className="font-bold text-gray-800">Open JW System</h4>
-                         <button 
-                           onClick={handleOpenJw}
-                           className="mt-2 flex items-center gap-2 bg-white border border-gray-300 px-3 py-1.5 rounded hover:bg-gray-50 text-sm transition"
-                         >
-                           <ExternalLink size={14}/> Open in New Window
-                         </button>
-                      </div>
-                   </div>
-
-                   <div className="flex gap-4 items-start">
-                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center flex-shrink-0">2</div>
-                      <div className="flex-1 min-w-0">
-                         <h4 className="font-bold text-gray-800">Run Script</h4>
-                         <p className="text-xs text-gray-500 mb-2">Press <kbd>F12</kbd> &gt; Console &gt; Paste Code &gt; Enter</p>
-                         
-                         <div className="relative group">
-                            <pre className="bg-slate-800 text-slate-300 p-3 rounded-lg text-[10px] font-mono overflow-x-auto h-24 border border-slate-700">
-                               {CRAWLER_SCRIPT}
-                            </pre>
-                            <button 
-                              onClick={handleCopyScript}
-                              className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white p-1.5 rounded transition backdrop-blur-sm"
-                              title="Copy Code"
-                            >
-                               <Copy size={14}/>
-                            </button>
-                         </div>
+                   <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg flex gap-3">
+                      <Shield size={20} className="text-blue-600 flex-shrink-0 mt-0.5"/>
+                      <div className="text-xs text-blue-800">
+                        <p className="font-bold mb-1">Privacy Notice</p>
+                        <p>Your credentials are sent directly to USTC CAS via a local proxy. We do not store your password.</p>
                       </div>
                    </div>
                    
-                   {status === 'waiting' && (
-                       <div className="flex items-center gap-2 text-xs text-blue-600 justify-center animate-pulse mt-4">
-                          <Loader2 size={14} className="animate-spin"/> Listening for data...
-                       </div>
-                   )}
+                   <form onSubmit={handleAutoLogin} className="space-y-4 pt-2">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-gray-600 uppercase flex items-center gap-1"><User size={12}/> Student ID</label>
+                        <input 
+                           type="text" 
+                           value={username}
+                           onChange={e => setUsername(e.target.value)}
+                           className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                           placeholder="PBxxxxxxxx"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-gray-600 uppercase flex items-center gap-1"><Lock size={12}/> Password</label>
+                        <div className="relative">
+                            <input 
+                                type={showPassword ? "text" : "password"} 
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 pr-10"
+                                placeholder="USTC Passport Password"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                            >
+                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                        </div>
+                      </div>
+
+                      {/* Captcha Input */}
+                      {captchaImg && (
+                          <div className="bg-orange-50 p-3 rounded border border-orange-100 animate-in fade-in slide-in-from-top-2">
+                             <p className="text-xs font-bold text-orange-800 mb-2">Security Verification Required</p>
+                             <div className="flex gap-3">
+                                 <img src={captchaImg} alt="Captcha" className="h-10 rounded border" />
+                                 <input 
+                                    type="text"
+                                    value={captchaCode}
+                                    onChange={e => setCaptchaCode(e.target.value)} 
+                                    className="flex-1 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-orange-500"
+                                    placeholder="Enter Code"
+                                    autoFocus
+                                 />
+                             </div>
+                          </div>
+                      )}
+
+                      {error && (
+                        <div className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200 flex items-center gap-2">
+                            <AlertCircle size={14}/> {error}
+                        </div>
+                      )}
+
+                      <button 
+                        type="submit" 
+                        disabled={isLoading}
+                        className="w-full bg-blue-600 text-white font-bold py-2.5 rounded hover:bg-blue-700 transition flex items-center justify-center gap-2 disabled:opacity-70"
+                      >
+                         {isLoading ? <Loader2 size={18} className="animate-spin"/> : <RefreshCw size={18}/>}
+                         {isLoading ? "Connecting to CAS..." : (captchaImg ? "Verify & Login" : "Start Sync")}
+                      </button>
+                   </form>
                 </div>
-             </div>
-          ) : (
-             <div className="space-y-4">
-                <textarea 
-                  value={jsonInput}
-                  onChange={(e) => setJsonInput(e.target.value)}
-                  placeholder='Paste the raw JSON response here...'
-                  className="w-full h-40 p-3 bg-gray-50 border border-gray-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                />
-                <button onClick={handleManualImport} className="w-full px-4 py-3 text-sm bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shadow-lg shadow-blue-200 transition">
-                  <Check size={18}/> Parse & Import
-                </button>
-             </div>
+              )}
+
+              {activeTab === 'script' && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-600">
+                      1. Open <a href="https://jw.ustc.edu.cn/for-std/course-table" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline inline-flex items-center gap-0.5">USTC JW Course Table <ExternalLink size={10}/></a>
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      2. Press <kbd className="bg-gray-100 px-1 rounded border">F12</kbd> to open Developer Tools, then click the <strong>Console</strong> tab.
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      3. Copy and paste the script below into the Console and press <kbd className="bg-gray-100 px-1 rounded border">Enter</kbd>.
+                    </p>
+                  </div>
+                  
+                  <div className="relative">
+                    <textarea 
+                      readOnly
+                      value={CRAWLER_SCRIPT}
+                      className="w-full h-40 bg-slate-900 text-green-400 font-mono text-xs p-3 rounded-lg outline-none resize-none"
+                    />
+                    <button 
+                      onClick={handleCopyScript}
+                      className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white p-1.5 rounded transition"
+                      title="Copy Script"
+                    >
+                      <Copy size={14}/>
+                    </button>
+                  </div>
+
+                  <div className="flex gap-3">
+                     <button 
+                       onClick={handleCopyScript}
+                       className="flex-1 bg-slate-800 text-white py-2 rounded text-sm font-bold hover:bg-slate-900 flex items-center justify-center gap-2"
+                     >
+                       <Copy size={16}/> Copy Script
+                     </button>
+                     <button 
+                       onClick={handleOpenJw}
+                       className="flex-1 bg-blue-50 text-blue-600 border border-blue-200 py-2 rounded text-sm font-bold hover:bg-blue-100 flex items-center justify-center gap-2"
+                     >
+                       <ExternalLink size={16}/> Open JW System
+                     </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'manual' && (
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600">
+                    If you have the raw JSON response from `get-data`, paste it below.
+                  </p>
+                  <textarea 
+                    value={jsonInput}
+                    onChange={(e) => setJsonInput(e.target.value)}
+                    placeholder='Paste JSON content here...'
+                    className="w-full h-48 border p-3 rounded text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                  />
+                  <button 
+                    onClick={handleManualImport}
+                    disabled={!jsonInput.trim()}
+                    className="w-full bg-blue-600 text-white font-bold py-2 rounded hover:bg-blue-700 disabled:opacity-50 transition flex items-center justify-center gap-2"
+                  >
+                    <PlayCircle size={16}/> Parse & Import
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
