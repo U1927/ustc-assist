@@ -4,6 +4,7 @@ import { ScheduleItem } from '../types';
 /**
  * CRAWLER SERVICE
  * Provides interfaces to connect to USTC systems via backend proxy.
+ * Note: This strictly relies on the Node.js backend (server.js) proxying requests to CAS/JW.
  */
 
 // 1. JW SYSTEM (First Classroom)
@@ -45,7 +46,7 @@ const callProxy = async (
       body: JSON.stringify(payload),
     });
 
-    if (response.status === 404) throw new Error("Proxy endpoint not found (Server down?)");
+    if (response.status === 404) throw new Error("Proxy endpoint not found (Ensure server.js is running)");
     
     const text = await response.text();
     let result;
@@ -68,8 +69,8 @@ const callProxy = async (
   }
 }
 
-// Deprecated legacy function stub to prevent compile errors if referenced
+// Deprecated stub to prevent usage
 export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
-  throw new Error("Use syncFromJW or syncFromYoung with credentials.");
+  throw new Error("Legacy method disabled. Use syncFromJW via ImportDialog.");
 };
 
