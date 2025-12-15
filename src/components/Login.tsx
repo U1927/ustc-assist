@@ -135,7 +135,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Not your CAS password"
+              placeholder="For this app account"
               disabled={isLoading}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
@@ -170,8 +170,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         <div className="mt-6 border-t border-gray-100 pt-4">
           <p className="text-[10px] text-center text-gray-400 leading-tight">
-             This is the local app account. <br/>
-             To sync schedule, use the "Import" feature inside the app.
+             This is a separate account for the Assistant App.<br/>
+             You will connect your USTC CAS account inside for data syncing.
           </p>
         </div>
       </div>
