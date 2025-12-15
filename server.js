@@ -8,275 +8,295 @@ const bodyParser = require('body-parser');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Enable CORS manually to prevent 405/Cors issues if proxy fails
+// Enable CORS
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
-// --- USTC JW CRAWLER PROXY ---
+// --- CRAWLER CONFIG ---
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// Helper to parse cookies from Set-Cookie header
+const HEADERS = {
+  'User-Agent': USER_AGENT,
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Connection': 'keep-alive',
+  'Upgrade-Insecure-Requests': '1'
+};
+
 const getCookies = (response) => {
   const setCookie = response.headers['set-cookie'];
   if (!setCookie) return '';
   return setCookie.map(c => c.split(';')[0]).join('; ');
 };
 
-const handleCaptchaDetection = async (html, sessionCookies, baseUrl) => {
-  const $ = cheerio.load(html);
-  let captchaImg = $('#validateImg'); 
-  let hasCaptcha = captchaImg.length > 0 || html.includes('validateCode') || html.includes('vcode');
-
-  let imgSrc = '';
-
-  if (hasCaptcha) {
-    imgSrc = captchaImg.attr('src');
-    if (!imgSrc) {
-        const match = html.match(/src=["']([^"']*validateCode[^"']*)["']/i) || html.match(/src=["']([^"']*vcode[^"']*)["']/i);
-        if (match) imgSrc = match[1];
-    }
-
-    if (imgSrc) {
-      if (!imgSrc.startsWith('http')) {
-         const origin = new URL(baseUrl).origin;
-         if (imgSrc.startsWith('/')) {
-            imgSrc = origin + imgSrc;
-         } else {
-             imgSrc = origin + '/' + imgSrc;
-         }
-      }
-
-      try {
-        const imgRes = await axios.get(imgSrc, {
-            responseType: 'arraybuffer',
-            headers: { 
-                'Cookie': sessionCookies,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
-        const base64 = Buffer.from(imgRes.data, 'binary').toString('base64');
-        return {
-            found: true,
-            image: `data:image/jpeg;base64,${base64}`
-        };
-      } catch (e) {
-        console.error("[Proxy] Failed to fetch captcha image:", e.message);
-      }
-    }
-  }
-  return { found: false };
+const decodeEntities = (str) => {
+  if (!str) return str;
+  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x2F;/g, "/");
 };
 
-// Real login implementation
-app.post('/api/jw/login', async (req, res) => {
-  const { username, password, captchaCode, context } = req.body;
+/**
+ * 核心逻辑：模拟浏览器跟随重定向
+ */
+const followRedirects = async (url, cookies) => {
+  let currentUrl = url;
+  let sessionCookies = cookies;
+  let html = '';
+  
+  for (let i = 0; i < 15; i++) {
+    try {
+        const res = await axios.get(currentUrl, {
+            headers: { ...HEADERS, 'Cookie': sessionCookies },
+            maxRedirects: 0, 
+            validateStatus: s => s < 500
+        });
 
+        const newCookies = getCookies(res);
+        if (newCookies) sessionCookies += '; ' + newCookies;
+        
+        html = res.data;
+
+        if (res.status === 302 || res.status === 301) {
+            let nextLoc = res.headers['location'];
+            if (!nextLoc.startsWith('http')) {
+                const origin = new URL(currentUrl).origin;
+                nextLoc = new URL(nextLoc, origin).href;
+            }
+            currentUrl = nextLoc;
+            continue;
+        }
+
+        if (typeof html === 'string') {
+             const meta = html.match(/<meta\s+http-equiv=["']refresh["']\s+content=["']\d+;\s*url=([^"']+)["']/i);
+             if (meta) { currentUrl = decodeEntities(meta[1]); continue; }
+             
+             const js = html.match(/(?:location\.href|location\.replace)\s*[=(]\s*['"]([^'"]+)['"]/i);
+             if (js) { currentUrl = decodeEntities(js[1]); continue; }
+        }
+        
+        break;
+    } catch (e) {
+        if (e.response && (e.response.status === 302 || e.response.status === 301)) {
+             const newCookies = getCookies(e.response);
+             if (newCookies) sessionCookies += '; ' + newCookies;
+             let nextLoc = e.response.headers['location'];
+             if (!nextLoc.startsWith('http')) {
+                const origin = new URL(currentUrl).origin;
+                nextLoc = new URL(nextLoc, origin).href;
+             }
+             currentUrl = nextLoc;
+             continue;
+        }
+        throw e;
+    }
+  }
+  return { html, cookies: sessionCookies, currentUrl };
+};
+
+// --- LOGIN API ROUTE ---
+app.post('/api/jw/login', async (req, res) => {
+  const { username, password, captchaCode, context, mode } = req.body;
+  
   if (!username || !password) {
-    return res.status(400).json({ success: false, error: 'Missing credentials' });
+    return res.status(400).json({ success: false, error: '请输入账号和密码' });
   }
 
+  // 1. CAS Login Entry
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
-  
-  let sessionCookies = '';
-  let lt = '';
-  let execution = '';
-  let eventId = 'submit';
 
   try {
-    if (context && context.sessionCookies && context.execution) {
-        console.log('[Proxy] Resuming session with provided context.');
+    let sessionCookies = '';
+    let lt = '', execution = '';
+
+    // --- STEP 1: Init CAS ---
+    if (context) {
         sessionCookies = context.sessionCookies;
-        lt = context.lt || '';
+        lt = context.lt;
         execution = context.execution;
-        eventId = context.eventId || 'submit';
     } else {
-        console.log('[Proxy] 1. Fetching CAS login page...');
-        const loginPage = await axios.get(CAS_LOGIN_URL, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-        });
-        sessionCookies = getCookies(loginPage);
-        const html = loginPage.data;
-        const $ = cheerio.load(html);
+        const init = await followRedirects(CAS_LOGIN_URL, '');
+        sessionCookies = init.cookies;
+        const $ = cheerio.load(init.html);
+        lt = $('input[name="lt"]').val();
+        execution = $('input[name="execution"]').val();
 
-        lt = $('input[name="lt"]').val() || $('input[id="lt"]').val();
-        execution = $('input[name="execution"]').val() || $('input[id="execution"]').val();
-        eventId = $('input[name="_eventId"]').val() || 'submit';
-
-        // 2. Fallback: Robust Greedy Regex for Tokens
-        if (!lt) {
-            const ltInputMatch = html.match(/<input[^>]*name=["']lt["'][^>]*value=["']([^"']+)["']/i) || 
-                                 html.match(/<input[^>]*value=["']([^"']+)["'][^>]*name=["']lt["']/i);
-            if (ltInputMatch) {
-                lt = ltInputMatch[1] || ltInputMatch[2];
-            } else {
-                const ltFormatMatch = html.match(/(LT-[a-zA-Z0-9\-\._]+)/); 
-                if (ltFormatMatch) lt = ltFormatMatch[1];
-            }
-        }
-
-        if (!execution) {
-            const inputRegex = /<input[^>]*name=["']execution["'][^>]*value=["']([^"']+)["']/i;
-            const inputRegexRev = /<input[^>]*value=["']([^"']+)["'][^>]*name=["']execution["']/i;
-            
-            const inputMatch = html.match(inputRegex) || html.match(inputRegexRev);
-            if (inputMatch) execution = inputMatch[1];
-        }
-
-        if (!execution) {
-             const execMatch = html.match(/(e[0-9]+s[0-9]+)/); 
-             if (execMatch) execution = execMatch[1];
-        }
-
-        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
-        
-        if (captchaCheck.found) {
-            console.log('[Proxy] Captcha required during initial load.');
-            return res.json({
-                success: false,
-                requireCaptcha: true,
-                captchaImage: captchaCheck.image,
-                message: "Security check required. Please enter code.",
-                context: { sessionCookies, lt: lt || '', execution: execution || '', eventId }
-            });
-        }
-
-        if (!execution) {
-             const title = $('title').text() || "No Title";
-             const snippet = html.substring(0, 1000).replace(/</g, '&lt;');
-             console.error(`[Proxy] Parsing Failed. Title: ${title}`);
-             return res.status(500).json({ 
+        if ($('#validateImg').length > 0 || init.html.includes('validateCode')) {
+             return res.json({ 
                  success: false, 
-                 error: `CAS Page Parsing Failed. System might have changed.`,
-                 debugHtml: `Page Title: ${title}\n\nSnippet:\n${snippet}`
+                 requireCaptcha: true, 
+                 message: "检测到安全验证，请输入验证码",
+                 captchaImage: 'https://passport.ustc.edu.cn/validatecode.jsp?type=login' 
              });
         }
     }
 
-    console.log('[Proxy] 2. Submitting credentials...');
+    // --- STEP 2: Submit Login ---
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
-    if (lt) params.append('lt', lt);
+    params.append('lt', lt);
     params.append('execution', execution);
-    params.append('_eventId', eventId);
-    if (!params.has('button')) params.append('button', 'login'); 
-    
-    if (captchaCode) {
-        params.append('vcode', captchaCode);
-    }
+    params.append('_eventId', 'submit');
+    params.append('button', 'login');
+    if (captchaCode) params.append('vcode', captchaCode);
 
-    const loginResponse = await axios.post(CAS_LOGIN_URL, params.toString(), {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie': sessionCookies,
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      maxRedirects: 0, 
-      validateStatus: (status) => status >= 200 && status < 400
+    const loginRes = await axios.post(CAS_LOGIN_URL, params.toString(), {
+        headers: { 
+            ...HEADERS,
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Cookie': sessionCookies 
+        },
+        maxRedirects: 0,
+        validateStatus: s => s < 500
     });
-
-    const newCookies = getCookies(loginResponse);
+    
+    const newCookies = getCookies(loginRes);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    if (loginResponse.status === 200) {
-        const html = loginResponse.data;
-        const $err = cheerio.load(html);
-        let errMsg = $err('#msg').text() || $err('.errors').text() || 'Login failed.';
+    if (loginRes.status === 200 && (loginRes.data.includes('id="msg"') || loginRes.data.includes('class="login"'))) {
+         const $fail = cheerio.load(loginRes.data);
+         const msg = $fail('#msg').text() || "登录失败，请检查账号密码";
+         return res.status(401).json({ success: false, error: msg });
+    }
 
-        const captchaCheck = await handleCaptchaDetection(html, sessionCookies, CAS_LOGIN_URL);
-        
-        if (captchaCheck.found) {
-            const newLt = $err('input[name="lt"]').val() || lt;
-            const newExec = $err('input[name="execution"]').val() || execution;
-            let finalExec = newExec;
-            if (!finalExec || finalExec === execution) {
-                 const execMatch = html.match(/(e[0-9]+s[0-9]+)/);
-                 if (execMatch) finalExec = execMatch[1];
+    // --- Authentication Check (Optional) ---
+    if (mode === 'auth') {
+        return res.json({ success: true, message: "身份验证通过" });
+    }
+
+    // --- STEP 3: JW Data Fetching (YZune/CourseAdapter Logic) ---
+    
+    // Follow redirect to jw.ustc.edu.cn to establish session
+    const jwResult = await followRedirects(CAS_LOGIN_URL, sessionCookies); 
+    const jwHtml = jwResult.html;
+    sessionCookies = jwResult.cookies; // Keep the updated cookies
+
+    let jwData = [];
+    let fetchError = null;
+
+    try {
+        // 1. Extract IDs from the page source
+        // Adapter logic: The IDs are usually in script variables or DOM elements
+        let studentId = '';
+        let bizTypeId = '2'; // Default
+        let semesterId = '';
+
+        const stdIdMatch = jwHtml.match(/studentId\s*[:=]\s*['"]?(\d+)['"]?/); 
+        if (stdIdMatch) studentId = stdIdMatch[1];
+
+        const bizMatch = jwHtml.match(/bizTypeId\s*[:=]\s*['"]?(\d+)['"]?/);
+        if (bizMatch) bizTypeId = bizMatch[1];
+
+        // SemesterID is crucial for correct data. Try Regex first.
+        const semMatch = jwHtml.match(/semesterId\s*[:=]\s*['"]?(\d+)['"]?/);
+        if (semMatch) semesterId = semMatch[1];
+
+        // Fallback: Use Cheerio to find selected option if regex fails
+        if (!semesterId) {
+             const $ = cheerio.load(jwHtml);
+             // Common pattern in USTC JW
+             semesterId = $('select[name="semesterId"] option[selected]').val() || 
+                          $('#semesterId option[selected]').val();
+        }
+
+        // 2. Fetch Data from API
+        if (studentId && semesterId) {
+            const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizTypeId}&semesterId=${semesterId}&studentId=${studentId}`;
+            console.log(`[JW] Fetching Course Data: ${apiUrl}`);
+            
+            const apiRes = await axios.get(apiUrl, {
+                headers: { ...HEADERS, 'Cookie': sessionCookies, 'Referer': 'https://jw.ustc.edu.cn/for-std/course-table' }
+            });
+            
+            // Handle different possible response structures
+            if (apiRes.data) {
+                 if (apiRes.data.lessons) jwData = apiRes.data.lessons;
+                 else if (apiRes.data.activities) jwData = apiRes.data.activities;
+                 else if (Array.isArray(apiRes.data)) jwData = apiRes.data; // sometimes root array
             }
+        } else {
+            console.warn("[JW] Failed to extract IDs. StudentID:", studentId, "SemesterID:", semesterId);
+            fetchError = "无法从页面提取学号或学期ID";
+        }
+    } catch (e) {
+        console.error("[JW] Data Fetch Error:", e.message);
+        fetchError = e.message;
+    }
 
-            return res.json({
-                success: false,
-                requireCaptcha: true,
-                captchaImage: captchaCheck.image,
-                message: errMsg.includes('验证') ? errMsg : "Verification code required.",
-                context: { 
-                    sessionCookies, 
-                    lt: newLt, 
-                    execution: finalExec || execution, 
-                    eventId 
+    // --- STEP 4: Young (Second Classroom) ---
+    let youngData = [];
+    try {
+        const youngService = 'http://young.ustc.edu.cn/uaa/cas/login';
+        const youngCasUrl = `https://passport.ustc.edu.cn/login?service=${encodeURIComponent(youngService)}`;
+        
+        const youngLoginResult = await followRedirects(youngCasUrl, sessionCookies);
+        const youngCookies = youngLoginResult.cookies; 
+
+        const youngScheduleUrl = 'http://young.ustc.edu.cn/bg/activity/my-activity-list'; 
+        const youngRes = await axios.get(youngScheduleUrl, {
+            headers: { ...HEADERS, 'Cookie': youngCookies }
+        });
+
+        const $young = cheerio.load(youngRes.data);
+        const rows = $young('table tbody tr');
+        
+        if (rows.length > 0) {
+            rows.each((i, el) => {
+                const cols = $young(el).find('td');
+                if (cols.length >= 3) {
+                    const name = $(cols[0]).text().trim(); 
+                    const timeStr = $(cols[1]).text().trim() || $(cols[2]).text().trim(); 
+                    const place = $(cols[2]).text().trim() || $(cols[3]).text().trim(); 
+
+                    const timeMatch = timeStr.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g);
+                    let start = '', end = '';
+                    if (timeMatch && timeMatch.length >= 1) start = timeMatch[0];
+                    if (timeMatch && timeMatch.length >= 2) end = timeMatch[1];
+
+                    if (name && start) {
+                        youngData.push({
+                            name: name,
+                            place: place,
+                            startTime: start,
+                            endTime: end || start, 
+                            description: "From Second Classroom (Parsed)"
+                        });
+                    }
                 }
             });
-        }
-        return res.status(401).json({ success: false, error: errMsg });
-    }
-
-    if (loginResponse.status === 302) {
-        const redirectUrl = loginResponse.headers['location'];
-        console.log('[Proxy] 3. Login Successful. Redirecting to:', redirectUrl);
-
-        const jwLoginResponse = await axios.get(redirectUrl, {
-            headers: { 
-                'Cookie': sessionCookies,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
-        });
-        
-        const jwCookies = getCookies(jwLoginResponse);
-        if (jwCookies) sessionCookies += '; ' + jwCookies;
-
-        console.log('[Proxy] 4. Fetching Course Data...');
-        const tablePageResponse = await axios.get('https://jw.ustc.edu.cn/for-std/course-table', {
-            headers: { 'Cookie': sessionCookies }
-        });
-
-        const pageHtml = tablePageResponse.data;
-        const studentIdMatch = pageHtml.match(/studentId[:\s"']+(\d+)/);
-        const bizTypeIdMatch = pageHtml.match(/bizTypeId[:\s"']+(\d+)/) || [null, '2'];
-
-        if (studentIdMatch) {
-            const stdId = studentIdMatch[1];
-            const bizId = bizTypeIdMatch[1];
-            const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizId}&studentId=${stdId}`;
-            
-            const dataResponse = await axios.get(apiUrl, { headers: { 'Cookie': sessionCookies } });
-            return res.json({ success: true, data: dataResponse.data });
         } 
-        
-        const activityMatch = pageHtml.match(/var\s+activities\s*=\s*(\[.*?\]);/s);
-        if (activityMatch) {
-            return res.json({ success: true, data: JSON.parse(activityMatch[1]) });
+        if (youngData.length === 0 && typeof youngRes.data === 'object') {
+             youngData = youngRes.data.rows || youngRes.data; 
         }
 
-        return res.status(500).json({ success: false, error: 'Login successful, but failed to extract schedule data from JW page.' });
+    } catch (e) {
+        console.error("Second Classroom Fetch Failed:", e.message);
     }
 
-    return res.status(500).json({ success: false, error: `Unexpected Status: ${loginResponse.status}` });
+    if (!jwData) jwData = [];
+
+    return res.json({
+        success: true,
+        data: {
+            firstClassroom: jwData,
+            secondClassroom: youngData
+        },
+        debug: fetchError
+    });
 
   } catch (error) {
-    console.error('[Proxy] Error:', error.message);
-    return res.status(500).json({ success: false, error: `System Error: ${error.message}` });
+    console.error("Handler Error:", error);
+    return res.status(500).json({ success: false, error: "服务器错误: " + error.message });
   }
 });
 
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
+app.listen(port, () => console.log(`Server is running on port ${port}`));
 
-// Handle SPA routing
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
-
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
-});
