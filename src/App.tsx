@@ -64,16 +64,17 @@ const App: React.FC = () => {
       setIsDataLoaded(true);
 
       // 2. Background Cloud Sync (Supabase)
-      if (process.env.VITE_SUPABASE_URL) {
+      // FIX: Use import.meta.env for Vite
+      if (import.meta.env.VITE_SUPABASE_URL) {
           setSyncStatus('syncing');
           const cloudData = await Storage.fetchUserData(studentId);
           if (cloudData) {
-              // Merge logic could be more complex, but here we prioritize cloud if it exists and has content
               if (cloudData.schedule.length > 0) setEvents(cloudData.schedule);
               if (cloudData.todos.length > 0) setTodos(cloudData.todos);
               setSyncStatus('idle');
           } else {
-              setSyncStatus('error');
+              // Could be first time user or error
+              setSyncStatus('idle');
           }
       }
   };
@@ -87,7 +88,8 @@ const App: React.FC = () => {
     Storage.saveTodos(todos);
 
     // Cloud Save (Debounced)
-    if (process.env.VITE_SUPABASE_URL) {
+    // FIX: Use import.meta.env for Vite
+    if (import.meta.env.VITE_SUPABASE_URL) {
         setSyncStatus('syncing');
         const timeoutId = setTimeout(async () => {
             const res = await Storage.saveUserData(user.studentId, events, todos);
