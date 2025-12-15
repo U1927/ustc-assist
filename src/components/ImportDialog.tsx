@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, RefreshCw, AlertCircle, Loader2, BookOpen, Coffee } from 'lucide-react';
+import { X, RefreshCw, AlertCircle, Loader2, BookOpen, Coffee, Eye, EyeOff } from 'lucide-react';
 import * as Crawler from '../services/crawlerService';
 
 interface ImportDialogProps {
@@ -13,6 +13,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
   const [source, setSource] = useState<'jw' | 'young'>('jw');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [captchaImg, setCaptchaImg] = useState('');
@@ -84,7 +85,24 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
           </div>
 
           <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border p-2 rounded text-sm outline-none focus:border-blue-500" placeholder="Student ID (PB...)" />
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border p-2 rounded text-sm outline-none focus:border-blue-500" placeholder="CAS Password" />
+          
+          <div className="relative">
+            <input 
+              type={showPassword ? "text" : "password"} 
+              value={password} 
+              onChange={e => setPassword(e.target.value)} 
+              className="w-full border p-2 rounded text-sm outline-none focus:border-blue-500 pr-10" 
+              placeholder="CAS Password" 
+            />
+            <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 focus:outline-none"
+                tabIndex={-1}
+            >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           
           {captchaImg && (
              <div className="flex gap-2">
