@@ -2,22 +2,84 @@
 import { ScheduleItem } from '../types';
 
 /**
- * CRAWLER SERVICE (Serverless Mode)
- * 
- * Since there is no backend server, we cannot bypass CORS to fetch data directly.
- * This file now serves as a placeholder or utility for client-side data handling.
- * 
- * Data synchronization is done via Manual Copy-Paste in the ImportDialog.
+ * CRAWLER SERVICE
+ * Provides interfaces to connect to USTC systems via backend proxy.
  */
 
-// Placeholder for potential future client-side extensions or browser extensions
-export const getInstructions = (system: 'jw' | 'yjs') => {
-    if (system === 'jw') {
-        return "1. Login to jw.ustc.edu.cn\n2. Open DevTools (F12) -> Network\n3. Refresh page\n4. Find request named 'get-data'\n5. Copy the Response JSON.";
+// 1. JW SYSTEM (First Classroom)
+export const syncFromJW = async (
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+): Promise<any> => {
+  return callProxy('/api/jw/login', username, pass, captchaCode, context);
+};
+
+// 2. YJS SYSTEM (Graduate)
+export const syncFromYJS = async (
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+): Promise<any> => {
+  return callProxy('/api/yjs/login', username, pass, captchaCode, context);
+};
+
+// 3. YOUNG SYSTEM (Second Classroom)
+export const syncFromYoung = async (
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+): Promise<any> => {
+  return callProxy('/api/young/login', username, pass, captchaCode, context);
+};
+
+// Helper
+const callProxy = async (
+  endpoint: string,
+  username: string, 
+  pass: string, 
+  captchaCode?: string, 
+  context?: any
+) => {
+  try {
+    const payload: any = { username, password: pass };
+    if (captchaCode) payload.captchaCode = captchaCode;
+    if (context) payload.context = context;
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 404) throw new Error("Proxy endpoint not found (Ensure server.js is running)");
+    
+    const text = await response.text();
+    let result;
+    try {
+      result = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`Server Error: ${text.substring(0, 50)}...`);
     }
-    if (system === 'yjs') {
-        return "1. Login to Graduate System (yjs1.ustc.edu.cn)\n2. Go to 'Student Course Schedule'\n3. Right-click page -> View Page Source (Ctrl+U)\n4. Copy ALL HTML code.";
+
+    if (result.requireCaptcha) return result;
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Connection failed');
     }
-    return "";
+
+    return result.data; 
+  } catch (error: any) {
+    console.error(`Proxy Error (${endpoint}):`, error);
+    throw new Error(error.message || "Network Error");
+  }
+}
+
+// Deprecated stub to prevent usage
+export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
+  throw new Error("Legacy method disabled. Use syncFromJW via ImportDialog.");
 };
 
