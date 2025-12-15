@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { validateStudentId } from '../services/utils';
 import { UserProfile } from '../types';
-import { BookOpen, User, ArrowRight } from 'lucide-react';
+import { BookOpen, ShieldCheck, ExternalLink } from 'lucide-react';
 import * as Utils from '../services/utils';
 
 interface LoginProps {
@@ -13,90 +13,112 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [studentId, setStudentId] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     
+    // Local Validation
     if (!validateStudentId(studentId)) {
       setError('Invalid ID format. Ex: PB20000001 or SA23...');
       return;
     }
 
-    // Local "Login" - Create Session
-    const userProfile: UserProfile = {
+    setIsLoading(true);
+    setError('');
+
+    // Simulate Auth Delay or Local Profile Creation
+    setTimeout(() => {
+      const userProfile: UserProfile = {
         studentId: studentId.toUpperCase(),
         name: name || `Student ${studentId.toUpperCase()}`,
         isLoggedIn: true,
         settings: {
-            earlyEightReminder: true,
-            reminderMinutesBefore: 15,
-            semester: {
-                name: 'Current Semester',
-                startDate: Utils.getSemesterDefaultStartDate(),
-                totalWeeks: 18
-            }
+          earlyEightReminder: true,
+          reminderMinutesBefore: 15,
+          semester: {
+             name: 'Current Semester',
+             startDate: Utils.getSemesterDefaultStartDate(),
+             totalWeeks: 18
+          }
         }
-    };
-    
-    onLogin(userProfile);
+      };
+      
+      onLogin(userProfile);
+      setIsLoading(false);
+    }, 1000);
   };
 
   return (
     <div className="min-h-screen bg-cover bg-center flex items-center justify-center relative" 
          style={{ backgroundImage: 'url("https://www.ustc.edu.cn/images/2022/10/24/20221024103608670.jpg")' }}>
       
+      {/* Overlay */}
       <div className="absolute inset-0 bg-blue-900/80 backdrop-blur-sm"></div>
 
-      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-[400px] z-10 relative border-t-4 border-blue-600 animate-in fade-in zoom-in duration-300">
+      <div className="bg-white rounded-lg shadow-2xl p-8 w-full max-w-[400px] z-10 relative border-t-4 border-blue-600">
         
-        <div className="flex flex-col items-center mb-8">
-           <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-4 shadow-lg ring-4 ring-blue-100">
-              <BookOpen className="text-white w-8 h-8" />
+        {/* Header mimicking USTC Passport */}
+        <div className="flex flex-col items-center mb-6">
+           <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mb-2 shadow-lg">
+              <BookOpen className="text-white w-6 h-6" />
            </div>
-           <h1 className="text-2xl font-bold text-gray-800">Learning Assistant</h1>
-           <p className="text-sm text-gray-500 mt-1">Offline Mode</p>
+           <h1 className="text-xl font-bold text-gray-800">Unified Identity Authentication</h1>
+           <p className="text-xs text-gray-500 mt-1">CAS - Central Authentication Service</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-1">
-            <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">Student ID</label>
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider">Student ID (学号)</label>
             <input
               type="text"
               value={studentId}
-              onChange={(e) => { setStudentId(e.target.value); setError(''); }}
-              placeholder="e.g., PB20000001"
-              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition text-sm font-mono"
+              onChange={(e) => {
+                setStudentId(e.target.value);
+                setError('');
+              }}
+              placeholder="e.g., PB21000001"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm"
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-xs font-bold text-gray-600 uppercase tracking-wider">Display Name (Optional)</label>
-            <input
+          <div>
+             <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider">Display Name (Optional)</label>
+             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your Name"
-              className="w-full px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition text-sm"
-            />
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm"
+             />
           </div>
 
           {error && (
-            <div className="text-red-600 text-xs bg-red-50 p-3 rounded-lg border border-red-200 flex items-center gap-2">
-               <User size={14} /> {error}
+            <div className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200 flex items-center gap-1">
+              <ShieldCheck size={12} /> {error}
             </div>
           )}
 
           <button
             type="submit"
-            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-lg transform active:scale-[0.98] transition duration-150 flex items-center justify-center gap-2"
+            disabled={isLoading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded shadow-lg transform active:scale-95 transition duration-150 flex items-center justify-center gap-2"
           >
-            Start Assistant <ArrowRight size={16}/>
+            {isLoading ? 'Creating Profile...' : 'Login / Register Profile'}
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-gray-100 text-center">
-          <p className="text-[10px] text-gray-400">
-             Serverless Edition. Data is stored locally in your browser.
+        <div className="mt-6 border-t border-gray-100 pt-4">
+          <a 
+            href="https://passport.ustc.edu.cn/login" 
+            target="_blank" 
+            rel="noreferrer"
+            className="text-xs text-blue-600 hover:underline flex items-center justify-center gap-1"
+          >
+            Go to Official Passport Page <ExternalLink size={10} />
+          </a>
+          <p className="text-[10px] text-center text-gray-400 mt-2">
+            This login creates a local profile. Use "Sync" inside the app to fetch data.
           </p>
         </div>
       </div>
