@@ -145,7 +145,7 @@ export default async function handler(req, res) {
          return res.status(401).json({ success: false, error: msg });
     }
 
-    // STEP 3: JW Data
+    // STEP 3: JW Data - CourseAdapter Logic
     const jwResult = await followRedirects(CAS_LOGIN_URL, sessionCookies); 
     const jwHtml = jwResult.html;
     sessionCookies = jwResult.cookies;
@@ -191,6 +191,7 @@ export default async function handler(req, res) {
         fetchError = e.message;
     }
 
+    // Return ONLY JW Data
     return res.json({
         success: true,
         data: {
