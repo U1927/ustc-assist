@@ -3,15 +3,13 @@ import { ScheduleItem } from '../types';
 
 /**
  * CRAWLER SERVICE
- * Calls the backend proxy to fetch data from USTC JW and Young systems.
+ * Calls the backend proxy to fetch data from USTC JW system.
  */
-
-const JW_BASE_URL = 'https://jw.ustc.edu.cn';
-const YOUNG_BASE_URL = 'https://young.ustc.edu.cn';
 
 /**
  * 1. PURE AUTHENTICATION (Used by Login/Register)
- * Verifies username/password with CAS, does NOT fetch data.
+ * Verifies username/password with CAS.
+ * IMPORTANT: Now we use 'fetch' mode even for login to verify we can actually get data.
  */
 export const verifyCredential = async (
   username: string, 
@@ -19,12 +17,12 @@ export const verifyCredential = async (
   captchaCode?: string, 
   context?: any
 ): Promise<any> => {
-  return callProxy(username, pass, 'auth', captchaCode, context);
+  return callProxy(username, pass, 'fetch', captchaCode, context);
 };
 
 /**
  * 2. FULL SYNC (Used by Import Dialog)
- * Authenticates AND fetches First/Second classroom data.
+ * Authenticates AND fetches First classroom data.
  */
 export const autoImportFromJw = async (
   username: string, 
@@ -79,14 +77,20 @@ const callProxy = async (
       throw new Error(result.error || 'Operation failed');
     }
 
-    return result.data || { success: true }; // auth mode might not return data
+    return result.data || { success: true }; 
   } catch (error: any) {
     console.error('Proxy Call Error:', error);
     throw new Error(error.message || "Network Error");
   }
 }
 
-// Legacy mock function - kept for compatibility
+/**
+ * DEPRECATED: Removed mock data fetching.
+ * This function now throws an error if called without credentials context,
+ * forcing the UI to use the ImportDialog or Login flow.
+ */
 export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
+  console.warn("Direct fetch without password is not possible for real data.");
   return [];
 };
+
