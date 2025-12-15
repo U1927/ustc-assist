@@ -2,7 +2,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-// 1. 模拟浏览器的请求头
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const HEADERS = {
@@ -29,7 +28,7 @@ const followRedirects = async (url, cookies) => {
   let sessionCookies = cookies;
   let html = '';
   
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 20; i++) {
     try {
         const res = await axios.get(currentUrl, {
             headers: { ...HEADERS, 'Cookie': sessionCookies },
@@ -86,7 +85,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const { username, password, captchaCode, context, mode } = req.body;
+  const { username, password, captchaCode, context } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, error: '请输入账号和密码' });
 
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
@@ -95,7 +94,7 @@ export default async function handler(req, res) {
     let sessionCookies = '';
     let lt = '', execution = '';
 
-    // --- STEP 1: Init CAS ---
+    // STEP 1
     if (context) {
         sessionCookies = context.sessionCookies;
         lt = context.lt;
@@ -117,7 +116,7 @@ export default async function handler(req, res) {
         }
     }
 
-    // --- STEP 2: Submit Login ---
+    // STEP 2
     const params = new URLSearchParams();
     params.append('username', username);
     params.append('password', password);
@@ -140,18 +139,13 @@ export default async function handler(req, res) {
     const newCookies = getCookies(loginRes);
     if (newCookies) sessionCookies += '; ' + newCookies;
 
-    if (loginRes.status === 200 && (loginRes.data.includes('id="msg"') || loginRes.data.includes('class="login"'))) {
+    if (loginRes.data.includes('id="msg"') || loginRes.data.includes('class="login"')) {
          const $fail = cheerio.load(loginRes.data);
          const msg = $fail('#msg').text() || "登录失败，请检查账号密码";
          return res.status(401).json({ success: false, error: msg });
     }
 
-    // --- Authentication Check ---
-    if (mode === 'auth') {
-        return res.json({ success: true, message: "身份验证通过" });
-    }
-
-    // --- STEP 3: JW Data Fetching (YZune/CourseAdapter Logic) ---
+    // STEP 3: JW Data
     const jwResult = await followRedirects(CAS_LOGIN_URL, sessionCookies); 
     const jwHtml = jwResult.html;
     sessionCookies = jwResult.cookies;
@@ -181,7 +175,6 @@ export default async function handler(req, res) {
 
         if (studentId && semesterId) {
             const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizTypeId}&semesterId=${semesterId}&studentId=${studentId}`;
-            console.log(`[JW] Fetching Course Data: ${apiUrl}`);
             
             const apiRes = await axios.get(apiUrl, {
                 headers: { ...HEADERS, 'Cookie': sessionCookies, 'Referer': 'https://jw.ustc.edu.cn/for-std/course-table' }
@@ -189,7 +182,6 @@ export default async function handler(req, res) {
             
              if (apiRes.data) {
                  if (apiRes.data.lessons) jwData = apiRes.data.lessons;
-                 else if (apiRes.data.activities) jwData = apiRes.data.activities;
                  else if (Array.isArray(apiRes.data)) jwData = apiRes.data;
             }
         } else {
@@ -199,62 +191,10 @@ export default async function handler(req, res) {
         fetchError = e.message;
     }
 
-    // --- STEP 4: Young (Second Classroom) ---
-    let youngData = [];
-    try {
-        const youngService = 'http://young.ustc.edu.cn/uaa/cas/login';
-        const youngCasUrl = `https://passport.ustc.edu.cn/login?service=${encodeURIComponent(youngService)}`;
-        
-        const youngLoginResult = await followRedirects(youngCasUrl, sessionCookies);
-        const youngCookies = youngLoginResult.cookies; 
-
-        const youngScheduleUrl = 'http://young.ustc.edu.cn/bg/activity/my-activity-list'; 
-        const youngRes = await axios.get(youngScheduleUrl, {
-            headers: { ...HEADERS, 'Cookie': youngCookies }
-        });
-
-        const $young = cheerio.load(youngRes.data);
-        const rows = $young('table tbody tr');
-        
-        if (rows.length > 0) {
-            rows.each((i, el) => {
-                const cols = $young(el).find('td');
-                if (cols.length >= 3) {
-                    const name = $(cols[0]).text().trim(); 
-                    const timeStr = $(cols[1]).text().trim() || $(cols[2]).text().trim(); 
-                    const place = $(cols[2]).text().trim() || $(cols[3]).text().trim(); 
-                    
-                    const timeMatch = timeStr.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g);
-                    let start = '', end = '';
-                    if (timeMatch && timeMatch.length >= 1) start = timeMatch[0];
-                    if (timeMatch && timeMatch.length >= 2) end = timeMatch[1];
-
-                    if (name && start) {
-                        youngData.push({
-                            name: name,
-                            place: place,
-                            startTime: start,
-                            endTime: end || start, 
-                            description: "From Second Classroom (Parsed)"
-                        });
-                    }
-                }
-            });
-        } 
-        if (youngData.length === 0 && typeof youngRes.data === 'object') {
-             youngData = youngRes.data.rows || youngRes.data; 
-        }
-    } catch (e) {
-        console.error("Second Classroom Fetch Failed:", e.message);
-    }
-
-    if (!jwData) jwData = [];
-
     return res.json({
         success: true,
         data: {
-            firstClassroom: jwData,
-            secondClassroom: youngData
+            firstClassroom: jwData
         },
         debug: fetchError
     });
