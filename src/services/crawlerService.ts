@@ -3,66 +3,51 @@ import { ScheduleItem } from '../types';
 
 /**
  * CRAWLER SERVICE
- * Calls the backend proxy to fetch data from USTC JW system.
+ * Provides interfaces to connect to USTC systems via backend proxy.
  */
 
-/**
- * 1. PURE AUTHENTICATION (Used by Login/Register)
- * Verifies username/password with CAS.
- * IMPORTANT: Now we use 'fetch' mode even for login to verify we can actually get data.
- */
-export const verifyCredential = async (
+// 1. JW SYSTEM (First Classroom)
+export const syncFromJW = async (
   username: string, 
   pass: string, 
   captchaCode?: string, 
   context?: any
 ): Promise<any> => {
-  return callProxy(username, pass, 'fetch', captchaCode, context);
+  return callProxy('/api/jw/login', username, pass, captchaCode, context);
 };
 
-/**
- * 2. FULL SYNC (Used by Import Dialog)
- * Authenticates AND fetches First classroom data.
- */
-export const autoImportFromJw = async (
+// 2. YOUNG SYSTEM (Second Classroom)
+export const syncFromYoung = async (
   username: string, 
   pass: string, 
   captchaCode?: string, 
   context?: any
 ): Promise<any> => {
-  return callProxy(username, pass, 'fetch', captchaCode, context);
+  return callProxy('/api/young/login', username, pass, captchaCode, context);
 };
 
-// Internal Helper
+// Helper
 const callProxy = async (
+  endpoint: string,
   username: string, 
   pass: string, 
-  mode: 'auth' | 'fetch',
   captchaCode?: string, 
   context?: any
 ) => {
   try {
-    const payload: any = { 
-        username, 
-        password: pass,
-        mode: mode // Send mode to server
-    };
+    const payload: any = { username, password: pass };
     if (captchaCode) payload.captchaCode = captchaCode;
     if (context) payload.context = context;
 
-    // Call local API proxy
-    const response = await fetch('/api/jw/login', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
-    if (response.status === 404) throw new Error("API Proxy not found. Ensure server.js is running.");
-    if (response.status === 504) throw new Error("Request Timed Out.");
-
+    if (response.status === 404) throw new Error("Proxy endpoint not found (Server down?)");
+    
     const text = await response.text();
-    if (!text) throw new Error(`Empty response from server.`);
-
     let result;
     try {
       result = JSON.parse(text);
@@ -70,27 +55,21 @@ const callProxy = async (
       throw new Error(`Server Error: ${text.substring(0, 50)}...`);
     }
 
-    // If captcha is required, return specific object
     if (result.requireCaptcha) return result;
 
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Operation failed');
+      throw new Error(result.error || 'Connection failed');
     }
 
-    return result.data || { success: true }; 
+    return result.data; 
   } catch (error: any) {
-    console.error('Proxy Call Error:', error);
+    console.error(`Proxy Error (${endpoint}):`, error);
     throw new Error(error.message || "Network Error");
   }
 }
 
-/**
- * DEPRECATED: Removed mock data fetching.
- * This function now throws an error if called without credentials context,
- * forcing the UI to use the ImportDialog or Login flow.
- */
+// Deprecated legacy function stub to prevent compile errors if referenced
 export const fetchAllData = async (studentId: string): Promise<ScheduleItem[]> => {
-  console.warn("Direct fetch without password is not possible for real data.");
-  return [];
+  throw new Error("Use syncFromJW or syncFromYoung with credentials.");
 };
 
