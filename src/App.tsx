@@ -9,9 +9,8 @@ import { ScheduleItem, TodoItem, UserProfile, ViewMode, AppSettings, Priority } 
 import * as Storage from './services/storageService';
 import * as Utils from './services/utils';
 import * as UstcParser from './services/ustcParser';
-import * as Crawler from './services/crawlerService';
 import { generateStudyPlan } from './services/aiService';
-import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Settings, Cloud, CheckCircle, WifiOff, Trash2, X, Clock, MapPin, BookOpen, AlignLeft } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, LogOut, Loader2, Cloud, CheckCircle, WifiOff, X, Clock, MapPin, BookOpen, AlignLeft, Trash2 } from 'lucide-react';
 import { addWeeks, addMonths, format, differenceInMinutes, isPast } from 'date-fns';
 
 type SyncStatus = 'idle' | 'syncing' | 'saved' | 'error';
@@ -57,18 +56,19 @@ const App: React.FC = () => {
   }, []);
 
   const loadData = async (studentId: string) => {
-      // Try Local
+      // 1. Load Local First (Fast)
       const localEvents = Storage.getSchedule();
       const localTodos = Storage.getTodos();
       setEvents(localEvents);
       setTodos(localTodos);
       setIsDataLoaded(true);
 
-      // Background Cloud Sync
+      // 2. Background Cloud Sync (Supabase)
       if (process.env.VITE_SUPABASE_URL) {
           setSyncStatus('syncing');
           const cloudData = await Storage.fetchUserData(studentId);
           if (cloudData) {
+              // Merge logic could be more complex, but here we prioritize cloud if it exists and has content
               if (cloudData.schedule.length > 0) setEvents(cloudData.schedule);
               if (cloudData.todos.length > 0) setTodos(cloudData.todos);
               setSyncStatus('idle');
@@ -78,19 +78,22 @@ const App: React.FC = () => {
       }
   };
 
-  // 2. Auto-Save Logic
+  // 2. Auto-Save Logic (Local + Cloud)
   useEffect(() => {
     if (!user || !isDataLoaded) return;
+    
+    // Local Save
     Storage.saveSchedule(events);
     Storage.saveTodos(todos);
 
+    // Cloud Save (Debounced)
     if (process.env.VITE_SUPABASE_URL) {
+        setSyncStatus('syncing');
         const timeoutId = setTimeout(async () => {
-            setSyncStatus('syncing');
             const res = await Storage.saveUserData(user.studentId, events, todos);
             setSyncStatus(res.success ? 'saved' : 'error');
             if (res.success) setTimeout(() => setSyncStatus('idle'), 2000);
-        }, 2000);
+        }, 1500);
         return () => clearTimeout(timeoutId);
     }
     
@@ -102,34 +105,13 @@ const App: React.FC = () => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
 
-  const handleImportJson = (jsonStr: any) => {
-    if (!user?.settings.semester?.startDate) return;
-    try {
-      const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
-      if (newItems.length === 0) { alert("No valid courses found."); return; }
-      
-      const existingSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
-      const uniqueItems = newItems.filter(item => !existingSignatures.has(`${item.title}-${item.startTime}`));
-      
-      if (uniqueItems.length === 0) { alert("All courses already exist."); setShowImportModal(false); return; }
+  // --- HANDLERS ---
 
-      setEvents(prev => [...prev, ...uniqueItems]);
-      setShowImportModal(false);
-      alert(`Successfully imported ${uniqueItems.length} sessions from JW.`);
-    } catch (e: any) { alert(`Failed: ${e.message}`); }
-  };
-
-  const handleLogin = (loggedInUser: UserProfile, initialData?: any) => {
+  const handleLogin = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
     loadData(loggedInUser.studentId);
     setIsDataLoaded(true);
-    
-    // Process initial data if fetched during login
-    if (initialData) {
-        // We defer this slightly to ensure settings/state is ready, though parseJwJson only needs startDate which is in user settings
-        setTimeout(() => handleImportJson(initialData), 100);
-    }
   };
 
   const handleLogout = () => {
@@ -138,12 +120,34 @@ const App: React.FC = () => {
     window.location.reload();
   };
 
-  const handleUpdateSettings = (newSettings: AppSettings) => {
-    if (user) setUser({ ...user, settings: newSettings });
+  // Import Data from Dialog (JW/Young)
+  const handleImportJson = (jsonStr: any) => {
+    if (!user?.settings.semester?.startDate) {
+        alert("Please set the Semester Start Date in settings first!");
+        setShowSettingsModal(true);
+        return;
+    }
+    try {
+      const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
+      if (newItems.length === 0) { alert("No valid courses found in data."); return; }
+      
+      // Deduplicate based on title+startTime
+      const existingSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
+      const uniqueItems = newItems.filter(item => !existingSignatures.has(`${item.title}-${item.startTime}`));
+      
+      if (uniqueItems.length === 0) { 
+          alert("All courses/activities already exist in your schedule."); 
+          setShowImportModal(false); 
+          return; 
+      }
+
+      setEvents(prev => [...prev, ...uniqueItems]);
+      setShowImportModal(false);
+      alert(`Successfully imported ${uniqueItems.length} items.`);
+    } catch (e: any) { alert(`Import Failed: ${e.message}`); }
   };
 
-  // --- ADD EVENT LOGIC ---
-
+  // Event Handlers
   const handleAddSingleEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEvent.title || !newEvent.startTime || !newEvent.endTime) return;
@@ -170,10 +174,7 @@ const App: React.FC = () => {
 
   const handleAddCourseSeries = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!courseForm.title || !user?.settings.semester?.startDate) {
-        alert("Please enter title and check settings.");
-        return;
-    }
+    if (!courseForm.title || !user?.settings.semester?.startDate) return;
 
     const newItems: ScheduleItem[] = [];
     const semesterStart = user.settings.semester.startDate;
@@ -195,18 +196,24 @@ const App: React.FC = () => {
                      startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
                      endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
                      textbook: courseForm.textbook,
-                     description: `Week ${w} Class`
+                     description: `Week ${w}`
                  });
              }
         });
     }
-
     setEvents([...events, ...newItems]);
     setShowAddModal(false);
-    setCourseForm({ title: '', location: '', textbook: '', weekStart: 1, weekEnd: 18, schedule: [{ day: 1, periods: '3-4' }] });
-    alert(`Added ${newItems.length} sessions.`);
+    alert(`Added ${newItems.length} course sessions.`);
   };
 
+  const handleDeleteEvent = (id: string) => {
+    if (confirm('Delete this event?')) {
+      setEvents(events.filter(e => e.id !== id));
+      if (selectedEvent?.id === id) setSelectedEvent(null);
+    }
+  };
+
+  // Todo Handlers
   const handleAddTodo = (content: string, deadline?: string, priority: Priority = 'medium') => {
     setTodos([...todos, {
       id: crypto.randomUUID(),
@@ -227,13 +234,7 @@ const App: React.FC = () => {
     setTodos(todos.filter(t => t.id !== id));
   };
 
-  const handleDeleteEvent = (id: string) => {
-    if (confirm('Delete this event?')) {
-      setEvents(events.filter(e => e.id !== id));
-      if (selectedEvent?.id === id) setSelectedEvent(null);
-    }
-  };
-
+  // AI Plan
   const handleGeneratePlan = async () => {
     setIsLoadingAI(true);
     const topics = todos.filter(t => !t.isCompleted).map(t => t.content).join(", ") || "General Revision";
@@ -265,14 +266,16 @@ const App: React.FC = () => {
       return Storage.changePassword(user.studentId, oldP, newP);
   };
 
+  const handleUpdateSettings = (newSettings: AppSettings) => {
+    if (user) setUser({ ...user, settings: newSettings });
+  };
+
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans text-slate-800">
-      
-      {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shadow-sm z-10 relative">
           <div className="flex items-center gap-4">
@@ -317,7 +320,6 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Calendar Grid */}
         <main className="flex-1 overflow-hidden p-4 relative">
           <CalendarView 
             mode={viewMode}
@@ -330,7 +332,6 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      {/* Right Sidebar */}
       <Sidebar 
         todos={todos}
         onAddTodo={handleAddTodo}
@@ -358,7 +359,6 @@ const App: React.FC = () => {
          onImport={handleImportJson}
       />
 
-      {/* Event Details Modal */}
       {selectedEvent && (
          <div className="fixed inset-0 bg-black/20 z-40 flex items-center justify-center backdrop-blur-sm" onClick={() => setSelectedEvent(null)}>
             <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
@@ -380,7 +380,6 @@ const App: React.FC = () => {
          </div>
       )}
 
-      {/* Simplified Add Modal (Code abbreviated for brevity as it was already there) */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
@@ -404,12 +403,10 @@ const App: React.FC = () => {
                 </form>
               ) : (
                 <form onSubmit={handleAddCourseSeries} className="space-y-4">
-                   {/* Course Form inputs... same as before */}
                    <div className="space-y-2">
                       <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Course Name (e.g. Linear Algebra)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
                       <div className="grid grid-cols-2 gap-2"><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Location" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} /><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} /></div>
                    </div>
-                   {/* Schedule Logic ... */}
                    <div className="bg-gray-50 p-3 rounded-lg space-y-3">
                       <h3 className="text-xs font-bold text-gray-500 uppercase">Schedule Logic</h3>
                       <div className="flex items-center gap-2 text-sm"><span className="text-gray-600">Weeks:</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} /><span className="text-gray-400">-</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} /></div>
