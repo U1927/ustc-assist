@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { validateStudentId } from '../services/utils';
 import { UserProfile } from '../types';
-import { BookOpen, ShieldCheck, Loader2, UserPlus, LogIn } from 'lucide-react';
+import { BookOpen, ShieldCheck, Loader2, LogIn, UserPlus } from 'lucide-react';
 import * as Storage from '../services/storageService';
 import * as Utils from '../services/utils';
 
@@ -16,15 +16,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [statusText, setStatusText] = useState('');
 
-  const isMounted = useRef(true);
-  useEffect(() => { return () => { isMounted.current = false; }; }, []);
-
-  // Clear error when switching modes
-  useEffect(() => {
-    setError('');
-  }, [mode]);
+  useEffect(() => setError(''), [mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,67 +38,51 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     try {
       if (mode === 'login') {
-        await processLogin(cleanId);
+        const res = await Storage.loginUser(cleanId, password);
+        if (res.success) {
+          onLogin({
+            studentId: cleanId,
+            name: `Student ${cleanId}`,
+            isLoggedIn: true,
+            settings: {
+              earlyEightReminder: true,
+              reminderMinutesBefore: 15,
+              semester: {
+                 name: 'Current Semester',
+                 startDate: Utils.getSemesterDefaultStartDate(),
+                 totalWeeks: 18
+              }
+            }
+          });
+        } else {
+          setError(res.error || "Login failed");
+        }
       } else {
-        await processRegister(cleanId);
+        const res = await Storage.registerUser(cleanId, password);
+        if (res.success) {
+           onLogin({
+            studentId: cleanId,
+            name: `Student ${cleanId}`,
+            isLoggedIn: true,
+            settings: {
+              earlyEightReminder: true,
+              reminderMinutesBefore: 15,
+              semester: {
+                 name: 'Current Semester',
+                 startDate: Utils.getSemesterDefaultStartDate(),
+                 totalWeeks: 18
+              }
+            }
+          });
+        } else {
+          setError(res.error || "Registration failed");
+        }
       }
     } catch (err: any) {
-      console.error("Auth Error:", err);
-      setError(err.message || "Operation failed.");
+      setError(err.message || "System error");
     } finally {
-      if (isMounted.current) setIsLoading(false);
+      setIsLoading(false);
     }
-  };
-
-  const processLogin = async (cleanId: string) => {
-    setStatusText('Authenticating...');
-    const dbResult = await Storage.loginUser(cleanId, password);
-
-    if (dbResult.success) {
-      console.log("[Login] Database login successful.");
-      completeLogin(cleanId);
-    } else {
-      if (dbResult.error && (dbResult.error.includes("not found") || dbResult.error.includes("register"))) {
-        setError("Account not found.");
-        throw new Error("Account not found. Please register.");
-      } else {
-        throw new Error(dbResult.error || "Login Failed");
-      }
-    }
-  };
-
-  const processRegister = async (cleanId: string) => {
-    setStatusText('Creating Account...');
-    // Pure Database Registration - No Crawler Verification here
-    const regResult = await Storage.registerUser(cleanId, password);
-    
-    if (!regResult.success) {
-      if (regResult.error?.includes("already exists")) {
-         await processLogin(cleanId); 
-         return;
-      }
-      throw new Error("Registration Failed: " + regResult.error);
-    }
-
-    // Auto-login after success
-    completeLogin(cleanId);
-  };
-
-  const completeLogin = (id: string) => {
-      onLogin({
-        studentId: id,
-        name: `Student ${id}`,
-        isLoggedIn: true,
-        settings: {
-          earlyEightReminder: true,
-          reminderMinutesBefore: 15,
-          semester: {
-             name: 'Current Semester',
-             startDate: Utils.getSemesterDefaultStartDate(),
-             totalWeeks: 18
-          }
-        }
-      });
   };
 
   return (
@@ -124,7 +101,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
            <p className="text-xs text-gray-500 mt-1">USTC Student Schedule Manager</p>
         </div>
 
-        {/* Mode Toggle Tabs */}
         <div className="flex border-b border-gray-200 mb-6">
            <button 
              onClick={() => setMode('login')}
@@ -154,12 +130,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider">Password</label>
+            <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider">App Password</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Your App Password"
+              placeholder="Not your CAS password"
               disabled={isLoading}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
@@ -181,7 +157,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           >
             {isLoading ? (
                 <>
-                 <Loader2 size={16} className="animate-spin" /> {statusText}
+                 <Loader2 size={16} className="animate-spin" /> Processing...
                 </>
             ) : (
                 <>
@@ -194,7 +170,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         <div className="mt-6 border-t border-gray-100 pt-4">
           <p className="text-[10px] text-center text-gray-400 leading-tight">
-             Secure cloud storage. Schedule syncing available after login via "Sync" button.
+             This is the local app account. <br/>
+             To sync schedule, use the "Import" feature inside the app.
           </p>
         </div>
       </div>
