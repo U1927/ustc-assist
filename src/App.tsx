@@ -65,32 +65,36 @@ const App: React.FC = () => {
       setIsDataLoaded(true);
 
       // Background Cloud Sync
-      setSyncStatus('syncing');
-      const cloudData = await Storage.fetchUserData(studentId);
-      if (cloudData) {
-          setEvents(cloudData.schedule);
-          setTodos(cloudData.todos);
-          setSyncStatus('idle');
-      } else {
-          setSyncStatus('error');
+      if (process.env.VITE_SUPABASE_URL) {
+          setSyncStatus('syncing');
+          const cloudData = await Storage.fetchUserData(studentId);
+          if (cloudData) {
+              if (cloudData.schedule.length > 0) setEvents(cloudData.schedule);
+              if (cloudData.todos.length > 0) setTodos(cloudData.todos);
+              setSyncStatus('idle');
+          } else {
+              setSyncStatus('error');
+          }
       }
   };
 
-  // 2. Auto-Save Logic (Local & Cloud)
+  // 2. Auto-Save Logic
   useEffect(() => {
     if (!user || !isDataLoaded) return;
     Storage.saveSchedule(events);
     Storage.saveTodos(todos);
 
-    const timeoutId = setTimeout(async () => {
-        setSyncStatus('syncing');
-        const res = await Storage.saveUserData(user.studentId, events, todos);
-        setSyncStatus(res.success ? 'saved' : 'error');
-        if (res.success) setTimeout(() => setSyncStatus('idle'), 2000);
-    }, 2000);
-
+    if (process.env.VITE_SUPABASE_URL) {
+        const timeoutId = setTimeout(async () => {
+            setSyncStatus('syncing');
+            const res = await Storage.saveUserData(user.studentId, events, todos);
+            setSyncStatus(res.success ? 'saved' : 'error');
+            if (res.success) setTimeout(() => setSyncStatus('idle'), 2000);
+        }, 2000);
+        return () => clearTimeout(timeoutId);
+    }
+    
     setConflicts(Utils.getConflicts(events));
-    return () => clearTimeout(timeoutId);
   }, [events, todos, user, isDataLoaded]);
 
   // 3. Persist Session
@@ -98,25 +102,7 @@ const App: React.FC = () => {
     if (user) Storage.saveUserSession(user);
   }, [user]);
 
-  // 4. Reminders
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!user) return;
-      const now = new Date();
-      events.forEach(event => {
-        const start = new Date(event.startTime);
-        const diffMinutes = differenceInMinutes(start, now);
-        if (diffMinutes === user.settings.reminderMinutesBefore) {
-          if (Notification.permission === 'granted') {
-             new Notification(`Upcoming: ${event.title}`, { body: `Starts in ${diffMinutes} minutes.` });
-          }
-        }
-      });
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [events, user]);
-
-  const handleImportJson = (jsonStr: string) => {
+  const handleImportJson = (jsonStr: any) => {
     if (!user?.settings.semester?.startDate) return;
     try {
       const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
@@ -129,15 +115,21 @@ const App: React.FC = () => {
 
       setEvents(prev => [...prev, ...uniqueItems]);
       setShowImportModal(false);
-      alert(`Imported ${uniqueItems.length} sessions.`);
+      alert(`Successfully imported ${uniqueItems.length} sessions from JW.`);
     } catch (e: any) { alert(`Failed: ${e.message}`); }
   };
 
-  const handleLogin = (loggedInUser: UserProfile) => {
+  const handleLogin = (loggedInUser: UserProfile, initialData?: any) => {
     setUser(loggedInUser);
     Storage.saveUserSession(loggedInUser);
     loadData(loggedInUser.studentId);
     setIsDataLoaded(true);
+    
+    // Process initial data if fetched during login
+    if (initialData) {
+        // We defer this slightly to ensure settings/state is ready, though parseJwJson only needs startDate which is in user settings
+        setTimeout(() => handleImportJson(initialData), 100);
+    }
   };
 
   const handleLogout = () => {
@@ -215,7 +207,6 @@ const App: React.FC = () => {
     alert(`Added ${newItems.length} sessions.`);
   };
 
-  // --- TODO LOGIC ---
   const handleAddTodo = (content: string, deadline?: string, priority: Priority = 'medium') => {
     setTodos([...todos, {
       id: crypto.randomUUID(),
@@ -367,6 +358,7 @@ const App: React.FC = () => {
          onImport={handleImportJson}
       />
 
+      {/* Event Details Modal */}
       {selectedEvent && (
          <div className="fixed inset-0 bg-black/20 z-40 flex items-center justify-center backdrop-blur-sm" onClick={() => setSelectedEvent(null)}>
             <div className="bg-white rounded-xl shadow-2xl p-6 w-80 animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
@@ -388,6 +380,7 @@ const App: React.FC = () => {
          </div>
       )}
 
+      {/* Simplified Add Modal (Code abbreviated for brevity as it was already there) */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
@@ -411,10 +404,12 @@ const App: React.FC = () => {
                 </form>
               ) : (
                 <form onSubmit={handleAddCourseSeries} className="space-y-4">
+                   {/* Course Form inputs... same as before */}
                    <div className="space-y-2">
                       <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Course Name (e.g. Linear Algebra)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
-                      <div className="grid grid-cols-2 gap-2"><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Location (e.g. 3C102)" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} /><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} /></div>
+                      <div className="grid grid-cols-2 gap-2"><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Location" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} /><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} /></div>
                    </div>
+                   {/* Schedule Logic ... */}
                    <div className="bg-gray-50 p-3 rounded-lg space-y-3">
                       <h3 className="text-xs font-bold text-gray-500 uppercase">Schedule Logic</h3>
                       <div className="flex items-center gap-2 text-sm"><span className="text-gray-600">Weeks:</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} /><span className="text-gray-400">-</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} /></div>
@@ -441,3 +436,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
