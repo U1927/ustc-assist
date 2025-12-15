@@ -13,22 +13,17 @@ const HEADERS = {
   'Upgrade-Insecure-Requests': '1'
 };
 
-// 工具：解析 Set-Cookie
 const getCookies = (response) => {
   const setCookie = response.headers['set-cookie'];
   if (!setCookie) return '';
   return setCookie.map(c => c.split(';')[0]).join('; ');
 };
 
-// 工具：处理 HTML 转义字符
 const decodeEntities = (str) => {
   if (!str) return str;
   return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#x2F;/g, "/");
 };
 
-/**
- * 核心逻辑：模拟浏览器跟随重定向
- */
 const followRedirects = async (url, cookies) => {
   let currentUrl = url;
   let sessionCookies = cookies;
@@ -94,7 +89,6 @@ export default async function handler(req, res) {
   const { username, password, captchaCode, context, mode } = req.body;
   if (!username || !password) return res.status(400).json({ success: false, error: '请输入账号和密码' });
 
-  // 1. CAS Login Entry
   const CAS_LOGIN_URL = 'https://passport.ustc.edu.cn/login?service=https%3A%2F%2Fjw.ustc.edu.cn%2Fucas-sso%2Flogin';
 
   try {
@@ -154,25 +148,20 @@ export default async function handler(req, res) {
 
     // --- Authentication Check ---
     if (mode === 'auth') {
-        console.log(`[API] Auth success for ${username}. Mode is 'auth', skipping data fetch.`);
         return res.json({ success: true, message: "身份验证通过" });
     }
 
     // --- STEP 3: JW Data Fetching (YZune/CourseAdapter Logic) ---
-    
-    // Follow redirect to jw.ustc.edu.cn to establish session
     const jwResult = await followRedirects(CAS_LOGIN_URL, sessionCookies); 
     const jwHtml = jwResult.html;
-    sessionCookies = jwResult.cookies; // Keep the updated cookies
+    sessionCookies = jwResult.cookies;
 
     let jwData = [];
     let fetchError = null;
 
     try {
-        // 1. Extract IDs from the page source
-        // Adapter logic: The IDs are usually in script variables or DOM elements
         let studentId = '';
-        let bizTypeId = '2'; // Default
+        let bizTypeId = '2'; 
         let semesterId = '';
 
         const stdIdMatch = jwHtml.match(/studentId\s*[:=]\s*['"]?(\d+)['"]?/); 
@@ -181,19 +170,15 @@ export default async function handler(req, res) {
         const bizMatch = jwHtml.match(/bizTypeId\s*[:=]\s*['"]?(\d+)['"]?/);
         if (bizMatch) bizTypeId = bizMatch[1];
 
-        // SemesterID is crucial for correct data. Try Regex first.
         const semMatch = jwHtml.match(/semesterId\s*[:=]\s*['"]?(\d+)['"]?/);
         if (semMatch) semesterId = semMatch[1];
 
-        // Fallback: Use Cheerio to find selected option if regex fails
         if (!semesterId) {
              const $ = cheerio.load(jwHtml);
-             // Common pattern in USTC JW
              semesterId = $('select[name="semesterId"] option[selected]').val() || 
                           $('#semesterId option[selected]').val();
         }
 
-        // 2. Fetch Data from API
         if (studentId && semesterId) {
             const apiUrl = `https://jw.ustc.edu.cn/for-std/course-table/get-data?bizTypeId=${bizTypeId}&semesterId=${semesterId}&studentId=${studentId}`;
             console.log(`[JW] Fetching Course Data: ${apiUrl}`);
@@ -202,23 +187,19 @@ export default async function handler(req, res) {
                 headers: { ...HEADERS, 'Cookie': sessionCookies, 'Referer': 'https://jw.ustc.edu.cn/for-std/course-table' }
             });
             
-            if (apiRes.data && apiRes.data.lessons) {
-                jwData = apiRes.data.lessons;
-            } else if (apiRes.data && apiRes.data.activities) {
-                // sometimes structure varies
-                jwData = apiRes.data.activities;
+             if (apiRes.data) {
+                 if (apiRes.data.lessons) jwData = apiRes.data.lessons;
+                 else if (apiRes.data.activities) jwData = apiRes.data.activities;
+                 else if (Array.isArray(apiRes.data)) jwData = apiRes.data;
             }
         } else {
-            console.warn("[JW] Failed to extract IDs. StudentID:", studentId, "SemesterID:", semesterId);
             fetchError = "无法从页面提取学号或学期ID";
         }
     } catch (e) {
-        console.error("[JW] Data Fetch Error:", e.message);
         fetchError = e.message;
     }
 
     // --- STEP 4: Young (Second Classroom) ---
-    // Keep existing logic for Second Classroom
     let youngData = [];
     try {
         const youngService = 'http://young.ustc.edu.cn/uaa/cas/login';
@@ -242,7 +223,7 @@ export default async function handler(req, res) {
                     const name = $(cols[0]).text().trim(); 
                     const timeStr = $(cols[1]).text().trim() || $(cols[2]).text().trim(); 
                     const place = $(cols[2]).text().trim() || $(cols[3]).text().trim(); 
-
+                    
                     const timeMatch = timeStr.match(/(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g);
                     let start = '', end = '';
                     if (timeMatch && timeMatch.length >= 1) start = timeMatch[0];
@@ -263,7 +244,6 @@ export default async function handler(req, res) {
         if (youngData.length === 0 && typeof youngRes.data === 'object') {
              youngData = youngRes.data.rows || youngRes.data; 
         }
-
     } catch (e) {
         console.error("Second Classroom Fetch Failed:", e.message);
     }
@@ -280,7 +260,6 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error("Handler Error:", error);
     return res.status(500).json({ success: false, error: "服务器错误: " + error.message });
   }
 }
