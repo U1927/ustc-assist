@@ -5,7 +5,7 @@ import { format } from 'date-fns';
 
 /**
  * 解析从教务系统提取的 JSON 数据
- * 兼容 `studentTableVm` 对象结构
+ * 兼容 `get-data` API 返回的 `lessons` 结构
  */
 export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] => {
   const scheduleItems: ScheduleItem[] = [];
@@ -15,18 +15,18 @@ export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] =
     let lessons: any[] = [];
     let secondClass: any[] = [];
 
-    // 如果是后端代理返回的组合数据
-    if (input.firstClassroom) {
+    // 后端代理返回的组合数据
+    if (input.firstClassroom || input.secondClassroom) {
         lessons = Array.isArray(input.firstClassroom) ? input.firstClassroom : [];
         secondClass = Array.isArray(input.secondClassroom) ? input.secondClassroom : [];
     } 
-    // 如果是用户手动粘贴的 studentTableVm 对象
-    else if (input.activities) {
-        lessons = input.activities;
-    } else if (input.lessons) {
+    // 直接粘贴 studentTableVm
+    else if (input.lessons) {
         lessons = input.lessons;
+    } else if (input.activities) {
+        lessons = input.activities;
     }
-    // 如果是用户手动粘贴的 activities 数组
+    // 直接粘贴数组
     else if (Array.isArray(input)) {
         lessons = input;
     }
@@ -35,8 +35,8 @@ export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] =
 
     // 2. 解析第一课堂 (JW)
     lessons.forEach((lesson) => {
-      // 字段映射：教务系统不同接口返回的字段名可能不同
       const title = lesson.courseName || lesson.nameZh || lesson.name || "Unknown Course";
+      // 兼容 API 返回的 classroom 对象或 room 对象
       const location = lesson.classroom?.name || lesson.room?.name || lesson.roomName || "TBD";
       
       // 提取教师
@@ -48,9 +48,7 @@ export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] =
       }
 
       // 时间信息
-      // `weeks`: [1, 2, 3...]
-      // `weekday`: 1-7
-      // `startUnit`: 1 (第1节)
+      // API 返回: weeks (number[]), weekday (number), startUnit (number), endUnit (number)
       const weeks = lesson.weeks || [];
       const weekday = lesson.weekday || lesson.dayOfWeek;
       const startUnit = lesson.startUnit || lesson.startPeriod;
@@ -74,13 +72,13 @@ export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] =
                  startTime: format(startDt, "yyyy-MM-dd'T'HH:mm:ss"),
                  endTime: format(endDt, "yyyy-MM-dd'T'HH:mm:ss"),
                  description: teacherName ? `Teacher: ${teacherName}` : undefined,
-                 textbook: '' // 教务系统通常不返回教材信息
+                 textbook: '' 
              });
          }
       });
     });
 
-    // 3. 解析第二课堂 (Simple Mapping)
+    // 3. 解析第二课堂
     secondClass.forEach((evt) => {
          scheduleItems.push({
              id: crypto.randomUUID(),
@@ -100,3 +98,4 @@ export const parseJwJson = (input: any, semesterStart: string): ScheduleItem[] =
 
   return scheduleItems;
 };
+
