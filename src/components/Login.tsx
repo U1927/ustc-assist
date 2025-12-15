@@ -2,9 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { validateStudentId } from '../services/utils';
 import { UserProfile } from '../types';
-import { BookOpen, ShieldCheck, Loader2, Database, Server, UserPlus, LogIn } from 'lucide-react';
+import { BookOpen, ShieldCheck, Loader2, UserPlus, LogIn } from 'lucide-react';
 import * as Storage from '../services/storageService';
-import * as Crawler from '../services/crawlerService';
 import * as Utils from '../services/utils';
 
 interface LoginProps {
@@ -19,19 +18,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
 
-  // Captcha State for Crawler verification
-  const [captchaImg, setCaptchaImg] = useState('');
-  const [captchaCode, setCaptchaCode] = useState('');
-  const [loginContext, setLoginContext] = useState<any>(null);
-
   const isMounted = useRef(true);
   useEffect(() => { return () => { isMounted.current = false; }; }, []);
 
   // Clear error when switching modes
   useEffect(() => {
     setError('');
-    setCaptchaImg('');
-    setCaptchaCode('');
   }, [mode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,7 +40,6 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     setIsLoading(true);
     setError('');
-    setCaptchaImg('');
     
     const cleanId = studentId.toUpperCase().trim();
 
@@ -61,12 +52,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     } catch (err: any) {
       console.error("Auth Error:", err);
       setError(err.message || "Operation failed.");
-      if (!err.message.includes('code') && !err.message.includes('Security')) {
-        setCaptchaImg('');
-        setLoginContext(null);
-      }
     } finally {
-      if (isMounted.current && !captchaImg) setIsLoading(false);
+      if (isMounted.current) setIsLoading(false);
     }
   };
 
@@ -88,21 +75,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   const processRegister = async (cleanId: string) => {
-    // 1. Verify credentials via USTC Proxy (Authentication Only - NO DATA FETCH)
-    setStatusText('Verifying Identity...');
-    const result = await Crawler.verifyCredential(cleanId, password, captchaCode, loginContext);
-
-    if (result.requireCaptcha) {
-      setCaptchaImg(result.captchaImage);
-      setLoginContext(result.context);
-      setStatusText('Security Check');
-      setIsLoading(false); 
-      return; 
-    }
-
-    // 2. Create DB Account
-    setStatusText('Creating Profile...');
+    setStatusText('Creating Account...');
+    // Pure Database Registration - No Crawler Verification
     const regResult = await Storage.registerUser(cleanId, password);
+    
     if (!regResult.success) {
       if (regResult.error?.includes("already exists")) {
          await processLogin(cleanId); 
@@ -111,7 +87,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       throw new Error("Registration Failed: " + regResult.error);
     }
 
-    // 3. Complete
+    // Auto-login after success
     completeLogin(cleanId);
   };
 
@@ -144,8 +120,8 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
            <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center mb-2 shadow-lg">
               <BookOpen className="text-white w-6 h-6" />
            </div>
-           <h1 className="text-xl font-bold text-gray-800">Unified Identity Authentication</h1>
-           <p className="text-xs text-gray-500 mt-1">CAS - Central Authentication Service</p>
+           <h1 className="text-xl font-bold text-gray-800">Learning Assistant</h1>
+           <p className="text-xs text-gray-500 mt-1">USTC Student Schedule Manager</p>
         </div>
 
         {/* Mode Toggle Tabs */}
@@ -172,7 +148,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               value={studentId}
               onChange={(e) => { setStudentId(e.target.value); setError(''); }}
               placeholder="e.g., PB20000001"
-              disabled={isLoading && !captchaImg}
+              disabled={isLoading}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
           </div>
@@ -183,34 +159,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="USTC Password"
-              disabled={isLoading && !captchaImg}
+              placeholder="Your App Password"
+              disabled={isLoading}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none transition text-sm disabled:opacity-50"
             />
           </div>
-
-          {/* Captcha Section */}
-          {captchaImg && (
-             <div className="animate-in fade-in slide-in-from-top-2">
-                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase tracking-wider text-red-600">Verification Code</label>
-                <div className="flex gap-2">
-                    <img 
-                      src={captchaImg} 
-                      alt="Captcha" 
-                      className="h-9 rounded border bg-white cursor-pointer" 
-                      onClick={() => setError('Please click button to refresh.')}
-                    />
-                    <input 
-                      type="text" 
-                      value={captchaCode} 
-                      onChange={e => setCaptchaCode(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                      placeholder="Code"
-                      autoFocus
-                    />
-                </div>
-             </div>
-          )}
 
           {error && (
             <div className="text-red-500 text-xs bg-red-50 p-3 rounded border border-red-200 flex flex-col gap-1">
@@ -232,17 +185,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <button
             type="submit"
-            disabled={isLoading && !captchaImg} 
+            disabled={isLoading} 
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded shadow-lg transform active:scale-95 transition duration-150 flex items-center justify-center gap-2"
           >
-            {isLoading && !captchaImg ? (
+            {isLoading ? (
                 <>
                  <Loader2 size={16} className="animate-spin" /> {statusText}
                 </>
             ) : (
                 <>
                   {mode === 'login' ? <LogIn size={16}/> : <UserPlus size={16}/>}
-                  {mode === 'login' ? 'Login' : 'Verify & Create'}
+                  {mode === 'login' ? 'Login' : 'Create Account'}
                 </>
             )}
           </button>
@@ -250,9 +203,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         <div className="mt-6 border-t border-gray-100 pt-4">
           <p className="text-[10px] text-center text-gray-400 leading-tight">
-             {mode === 'register' 
-               ? "Identity verification only. Course data can be imported later." 
-               : "Secure local login."}
+             Secure cloud storage. Schedule syncing available after login.
           </p>
         </div>
       </div>
@@ -265,3 +216,4 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 };
 
 export default Login;
+
