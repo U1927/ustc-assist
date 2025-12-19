@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 import { ScheduleItem, ViewMode, TodoItem } from '../types';
 import { 
