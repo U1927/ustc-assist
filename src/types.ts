@@ -1,18 +1,15 @@
 
 export type EventType = 'course' | 'activity' | 'exam' | 'study';
-export type ClassroomCategory = 'first' | 'second' | 'none';
 
 export interface ScheduleItem {
   id: string;
   title: string;
   location: string;
   type: EventType;
-  category: ClassroomCategory; 
   startTime: string; // ISO string
   endTime: string; // ISO string
   description?: string;
-  teacher?: string;
-  weeks?: number[]; // 解析出的具体周次
+  textbook?: string; // Requirement: Books to bring
 }
 
 export type Priority = 'high' | 'medium' | 'low';
@@ -20,7 +17,7 @@ export type Priority = 'high' | 'medium' | 'low';
 export interface TodoItem {
   id: string;
   content: string;
-  deadline?: string; 
+  deadline?: string; // ISO string
   isCompleted: boolean;
   isExpired: boolean;
   tags: string[];
@@ -28,9 +25,9 @@ export interface TodoItem {
 }
 
 export interface SemesterConfig {
-  name: string;
-  startDate: string;
-  totalWeeks: number;
+  name: string;       // e.g., "2024 Fall"
+  startDate: string;  // ISO Date string (YYYY-MM-DD) of the Monday of Week 1
+  totalWeeks: number; // e.g., 18
 }
 
 export interface AppSettings {
@@ -50,3 +47,7 @@ export enum ViewMode {
   WEEK = 'WEEK',
   MONTH = 'MONTH'
 }
+
+export const USTC_DEPARTMENTS = [
+  'PB', 'SA', 'SC', 'BA', 'KY'
+];
