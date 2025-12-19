@@ -1,7 +1,5 @@
-
-
-import React from 'react';
-import { ScheduleItem, ViewMode, TodoItem } from '../types';
+import React, { useMemo } from 'react';
+import { ScheduleItem, ViewMode } from '../types';
 import { 
   format, 
   addDays, 
@@ -10,9 +8,9 @@ import {
   isSameDay, 
   getHours,
   getMinutes,
-  compareAsc
+  differenceInMinutes
 } from 'date-fns';
-import { MapPin, Book } from 'lucide-react';
+import { Clock, MapPin, Book } from 'lucide-react';
 
 // Helpers to replace missing date-fns exports
 const parseISO = (str: string) => new Date(str);
@@ -31,38 +29,27 @@ interface CalendarViewProps {
   mode: ViewMode;
   currentDate: Date;
   events: ScheduleItem[];
-  todos: TodoItem[];
   onDeleteEvent: (id: string) => void;
-  onSelectEvent: (event: ScheduleItem) => void;
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ 
-  mode, 
-  currentDate, 
-  events, 
-  todos,
-  onDeleteEvent,
-  onSelectEvent
-}) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ mode, currentDate, events, onDeleteEvent }) => {
   
   // Helper to color code events
   const getEventColor = (type: ScheduleItem['type']) => {
     switch (type) {
-      case 'course': return 'bg-blue-100 border-blue-400 text-blue-900 hover:bg-blue-200';
-      case 'activity': return 'bg-green-100 border-green-400 text-green-900 hover:bg-green-200';
-      case 'exam': return 'bg-red-100 border-red-400 text-red-900 hover:bg-red-200';
-      case 'study': return 'bg-purple-100 border-purple-400 text-purple-900 hover:bg-purple-200';
-      default: return 'bg-gray-100 border-gray-400 text-gray-900';
+      case 'course': return 'bg-blue-100 border-blue-300 text-blue-800';
+      case 'activity': return 'bg-green-100 border-green-300 text-green-800'; // Second classroom
+      case 'exam': return 'bg-red-100 border-red-300 text-red-800';
+      case 'study': return 'bg-purple-100 border-purple-300 text-purple-800';
+      default: return 'bg-gray-100 border-gray-300 text-gray-800';
     }
   };
 
   const renderWeekView = () => {
     const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday start
     const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-    // 00:00 to 24:00 (24 hours)
-    const hours = Array.from({ length: 24 }, (_, i) => i); 
-    const HOUR_HEIGHT = 60; // px
-    
+    const hours = Array.from({ length: 16 }, (_, i) => i + 7); // 7:00 to 22:00
+
     return (
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header Days */}
@@ -78,12 +65,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
         {/* Time Grid */}
         <div className="flex-1 overflow-y-auto relative bg-white">
-          <div className="grid grid-cols-8 relative" style={{ height: `${24 * HOUR_HEIGHT}px` }}>
+          <div className="grid grid-cols-8 relative" style={{ height: '960px' }}> {/* 16 hours * 60px */}
             
             {/* Time Labels */}
-            <div className="col-span-1 border-r border-gray-100 bg-white z-10">
+            <div className="col-span-1 border-r border-gray-100">
               {hours.map(h => (
-                <div key={h} className="text-xs text-gray-400 pr-2 text-right relative -top-2" style={{ height: `${HOUR_HEIGHT}px` }}>
+                <div key={h} className="h-[60px] text-xs text-gray-400 p-1 text-right relative -top-2">
                   {h}:00
                 </div>
               ))}
@@ -93,40 +80,13 @@ const CalendarView: React.FC<CalendarViewProps> = ({
             {days.map((day, dayIndex) => {
                // Filter events for this day
                const dayEvents = events.filter(e => isSameDay(parseISO(e.startTime), day));
-               
-               // Filter todos with deadlines on this day
-               const dayTodos = todos.filter(t => t.deadline && isSameDay(parseISO(t.deadline), day) && !t.isCompleted);
 
                return (
                 <div key={day.toISOString()} className="col-span-1 border-r border-gray-100 relative h-full">
                   {/* Horizontal grid lines */}
                   {hours.map(h => (
-                     <div key={h} className="border-b border-gray-50 w-full absolute" style={{ top: `${h * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }} />
+                     <div key={h} className="h-[60px] border-b border-gray-50 w-full absolute" style={{ top: `${(h - 7) * 60}px` }} />
                   ))}
-
-                  {/* Render Todo Deadlines */}
-                  {dayTodos.map(todo => {
-                    const ddl = parseISO(todo.deadline!);
-                    const ddlHour = getHours(ddl) + getMinutes(ddl) / 60;
-                    const top = ddlHour * HOUR_HEIGHT;
-                    
-                    return (
-                      <div 
-                        key={todo.id}
-                        className="absolute w-full z-20 group"
-                        style={{ top: `${top}px` }}
-                      >
-                         {/* DDL Line */}
-                         <div className="w-full border-t border-red-400 border-dashed opacity-70"></div>
-                         {/* Todo Label */}
-                         <div className="absolute -top-4 left-0 right-0">
-                            <span className="text-[10px] bg-red-50 text-red-600 px-1 rounded shadow-sm border border-red-100 truncate block max-w-full">
-                              Due: {todo.content}
-                            </span>
-                         </div>
-                      </div>
-                    );
-                  })}
 
                   {/* Render Events */}
                   {dayEvents.map(event => {
@@ -136,35 +96,32 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                     const endHour = getHours(end) + getMinutes(end) / 60;
                     const durationHours = endHour - startHour;
                     
-                    const top = startHour * HOUR_HEIGHT;
-                    const height = Math.max(durationHours * HOUR_HEIGHT, 24); // Min height ensures readability
+                    const top = (startHour - 7) * 60;
+                    const height = durationHours * 60;
 
                     return (
                       <div 
                         key={event.id}
-                        onClick={() => onSelectEvent(event)}
-                        className={`absolute left-0.5 right-0.5 rounded px-1 text-xs border border-l-4 shadow-sm group overflow-hidden transition-all hover:z-30 hover:shadow-md cursor-pointer flex flex-col justify-center ${getEventColor(event.type)}`}
+                        className={`absolute left-0.5 right-0.5 rounded px-1 py-1 text-xs border border-l-4 shadow-sm group overflow-hidden transition-all hover:z-10 hover:shadow-md ${getEventColor(event.type)}`}
                         style={{ top: `${top}px`, height: `${height}px` }}
                       >
-                        {/* Corner Times */}
-                        <div className="absolute top-0.5 left-1 text-[9px] font-mono opacity-60 leading-none">{format(start, 'HH:mm')}</div>
-                        <div className="absolute bottom-0.5 right-1 text-[9px] font-mono opacity-60 leading-none">{format(end, 'HH:mm')}</div>
-
-                        <div className="px-0.5 py-3 w-full">
-                           <div className="font-bold truncate leading-tight">{event.title}</div>
-                           {height > 40 && (
-                             <div className="flex items-center gap-1 mt-0.5 opacity-90 truncate text-[10px]">
-                               <MapPin size={10} /> {event.location}
-                             </div>
-                           )}
-                        </div>
-
-                        <button 
+                        <div className="flex justify-between items-start">
+                           <span className="font-bold truncate">{event.title}</span>
+                           <button 
                               onClick={(e) => { e.stopPropagation(); onDeleteEvent(event.id); }}
-                              className="absolute top-0 right-0 hidden group-hover:block text-red-500 hover:text-red-700 font-bold px-1 bg-white/50 rounded-bl"
-                        >
-                          ×
-                        </button>
+                              className="hidden group-hover:block text-red-500 hover:text-red-700 font-bold px-1 bg-white/50 rounded"
+                           >
+                             ×
+                           </button>
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5 opacity-90 truncate">
+                          <MapPin size={10} /> {event.location}
+                        </div>
+                        {event.textbook && (
+                          <div className="flex items-center gap-1 mt-0.5 opacity-80 truncate">
+                             <Book size={10} /> {event.textbook}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -181,6 +138,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(monthStart);
     const startDate = startOfWeek(monthStart, { weekStartsOn: 1 });
+    // const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 }); // helper below uses startOfWeek
+    
+    // date-fns endOfWeek helper if not imported
     const finalDate = addDays(startDate, 41); // Ensure 6 rows
 
     const days = eachDayOfInterval({ start: startDate, end: finalDate });
@@ -193,30 +153,23 @@ const CalendarView: React.FC<CalendarViewProps> = ({
           </div>
         ))}
         {days.slice(0, 42).map(day => {
-          const dayEvents = events
-             .filter(e => isSameDay(parseISO(e.startTime), day))
-             .sort((a, b) => compareAsc(parseISO(a.startTime), parseISO(b.startTime)));
-             
+          const dayEvents = events.filter(e => isSameDay(parseISO(e.startTime), day));
           const isCurrentMonth = day.getMonth() === currentDate.getMonth();
 
           return (
-            <div key={day.toISOString()} className={`border-r border-b p-1 flex flex-col h-full overflow-hidden ${isCurrentMonth ? 'bg-white' : 'bg-gray-50'}`}>
-              <div className={`text-xs mb-1 font-medium flex-shrink-0 ${isSameDay(day, new Date()) ? 'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center' : 'text-gray-500'}`}>
+            <div key={day.toISOString()} className={`border-r border-b p-1 min-h-[80px] ${isCurrentMonth ? 'bg-white' : 'bg-gray-50'}`}>
+              <div className={`text-xs mb-1 font-medium ${isSameDay(day, new Date()) ? 'bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center' : 'text-gray-500'}`}>
                 {format(day, 'd')}
               </div>
-              
-              {/* Scrollable Event List */}
-              <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
-                {dayEvents.map(event => (
-                  <div 
-                    key={event.id} 
-                    onClick={() => onSelectEvent(event)}
-                    className={`text-[10px] px-1 py-0.5 rounded truncate border-l-2 cursor-pointer transition hover:opacity-80 ${getEventColor(event.type)}`}
-                  >
-                    <span className="font-mono opacity-70 mr-1">{format(parseISO(event.startTime), 'HH:mm')}</span>
-                    {event.title}
+              <div className="space-y-1">
+                {dayEvents.slice(0, 3).map(event => (
+                  <div key={event.id} className={`text-[10px] px-1 rounded truncate border-l-2 ${getEventColor(event.type)}`}>
+                    {format(parseISO(event.startTime), 'HH:mm')} {event.title}
                   </div>
                 ))}
+                {dayEvents.length > 3 && (
+                  <div className="text-[10px] text-gray-400 pl-1">+ {dayEvents.length - 3} more</div>
+                )}
               </div>
             </div>
           );
@@ -231,5 +184,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({
     </div>
   );
 };
+
+// Local helper just in case
+const endOfWeek = (date: Date, options?: { weekStartsOn?: 0 | 1 | 2 | 3 | 4 | 5 | 6 }) => {
+   const weekStart = startOfWeek(date, options as any);
+   return addDays(weekStart, 6);
+}
 
 export default CalendarView;
