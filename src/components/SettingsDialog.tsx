@@ -84,7 +84,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
       <div className="bg-white rounded-xl shadow-2xl w-[500px] max-w-full m-4 flex flex-col animate-in zoom-in-95 duration-200 max-h-[90vh]">
         <div className="flex items-center justify-between p-4 border-b">
            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-             <Sliders size={20} className="text-blue-600"/> Preferences
+             <Sliders size={20} className="text-blue-600"/> 偏好设置
            </h2>
            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20}/></button>
         </div>
@@ -95,11 +95,11 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
             {/* Semester Settings */}
             <div className="space-y-3">
               <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1 flex items-center gap-1">
-                <Calendar size={12}/> Academic Calendar
+                <Calendar size={12}/> 学生课表
               </h3>
               <div className="grid grid-cols-2 gap-4">
                  <div>
-                   <label className="block text-xs font-semibold text-gray-600 mb-1">Semester Name</label>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">学期名称</label>
                    <input 
                      type="text" 
                      value={formData.semester?.name || ''}
@@ -123,7 +123,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    />
                  </div>
                  <div className="col-span-2">
-                   <label className="block text-xs font-semibold text-gray-600 mb-1">开始日期 (Monday of Week 1)</label>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">开始日期 (第1周的星期一)</label>
                    <input 
                      type="date" 
                      value={formData.semester?.startDate || ''}
@@ -142,7 +142,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
             {/* Notifications */}
             <div className="space-y-3">
-              <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1">Notifications</h3>
+              <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1">通知</h3>
               <div className="space-y-3">
                 <label className="flex items-center gap-3 p-3 border rounded-lg bg-gray-50 hover:bg-white transition cursor-pointer select-none">
                   <input 
@@ -242,7 +242,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
           {/* Debugging Zone */}
           <div className="pt-2">
-            <h3 className="text-xs font-bold text-gray-500 uppercase mb-2 border-b pb-1">Troubleshooting</h3>
+            <h3 className="text-xs font-bold text-gray-500 uppercase mb-2 border-b pb-1">数据上传错误</h3>
             <button 
               type="button"
               onClick={handleManualSync}
@@ -256,7 +256,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
         </div>
 
         <div className="p-4 border-t bg-gray-50 flex justify-end gap-2 rounded-b-xl">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded">Close</button>
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded">关闭</button>
           <button form="settings-form" type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
             <Save size={16}/>保存偏好设置
           </button>
