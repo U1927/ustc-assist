@@ -25,15 +25,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
     // 1. Validation
     if (!validateStudentId(studentId)) {
-      setError('Invalid ID format. (e.g., PB20000001)');
+      setError('错误的学号格式. (e.g., PB20000001)');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError('密码必须至少包含6个字符');
       return;
     }
     if (isRegistering && password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError('密码不匹配');
       return;
     }
 
@@ -47,14 +47,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           setIsRegistering(false);
           setConfirmPassword('');
           setError('');
-          alert('Registration successful! Please login.');
+          alert('注册成功！请登录');
         } else {
           // If DB is missing, we simulate registration success locally
           if (res.error?.includes('Database not connected')) {
               setDbStatus('offline');
               handleLocalLogin(); // Auto login locally
           } else {
-              setError(res.error || 'Registration failed');
+              setError(res.error || '注册失败');
           }
         }
       } else {
@@ -64,13 +64,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
           // Success from DB
           const userProfile: UserProfile = {
             studentId: res.user.student_id,
-            name: `Student ${res.user.student_id}`,
+            name: `学生 ${res.user.student_id}`,
             isLoggedIn: true,
             settings: {
               earlyEightReminder: true,
               reminderMinutesBefore: 15,
               semester: {
-                 name: 'Current Semester',
+                 name: '本学期',
                  startDate: Utils.getSemesterDefaultStartDate(),
                  totalWeeks: 18
               }
@@ -84,7 +84,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
              // Fallback to local "mock" login if DB is not configured
              handleLocalLogin();
           } else {
-             setError(res.error || 'Login failed');
+             setError(res.error || '登录失败');
           }
         }
       }
@@ -106,7 +106,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               earlyEightReminder: true,
               reminderMinutesBefore: 15,
               semester: {
-                 name: 'Current Semester',
+                 name: '本学期',
                  startDate: Utils.getSemesterDefaultStartDate(),
                  totalWeeks: 18
               }
@@ -129,9 +129,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
            <div className="mx-auto w-14 h-14 bg-white/20 rounded-full flex items-center justify-center mb-3 backdrop-blur-md shadow-inner">
               <BookOpen className="text-white w-8 h-8" />
            </div>
-           <h1 className="text-2xl font-bold tracking-tight">USTC Assistant</h1>
+           <h1 className="text-2xl font-bold tracking-tight">USTC 日程助手 </h1>
            <p className="text-blue-100 text-sm mt-1">
-             {isRegistering ? 'Create Student Profile' : 'Student Authentication'}
+             {isRegistering ? '创建帐户' : '学生身份验证'}
            </p>
            
            {/* Decorative circles */}
@@ -144,7 +144,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             
             {/* Student ID */}
             <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1">Student ID</label>
+                <label className="text-xs font-bold text-gray-500 uppercase ml-1">学号</label>
                 <div className="relative">
                     <User className="absolute left-3 top-2.5 text-gray-400" size={18} />
                     <input
@@ -159,7 +159,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
             {/* Password */}
             <div className="space-y-1.5">
-                <label className="text-xs font-bold text-gray-500 uppercase ml-1">Password</label>
+                <label className="text-xs font-bold text-gray-500 uppercase ml-1">密码</label>
                 <div className="relative">
                     <Lock className="absolute left-3 top-2.5 text-gray-400" size={18} />
                     <input
@@ -182,7 +182,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                             type="password"
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
-                            placeholder="Confirm password"
+                            placeholder="确认密码"
                             className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm font-medium"
                         />
                     </div>
@@ -201,7 +201,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {dbStatus === 'offline' && !error && (
                  <div className="text-amber-600 text-xs bg-amber-50 p-2 rounded border border-amber-100 flex items-center gap-2">
                     <AlertCircle size={12} />
-                    Using Local Storage (No Cloud DB detected)
+                    使用本地存储（未检测到云数据库）
                  </div>
             )}
 
@@ -210,19 +210,19 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 disabled={isLoading}
                 className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-lg shadow-lg transform active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2 mt-2"
             >
-                {isLoading ? <Loader2 className="animate-spin" size={18} /> : (isRegistering ? 'Create Account' : 'Sign In')}
+                {isLoading ? <Loader2 className="animate-spin" size={18} /> : (isRegistering ? '创建账户' : '登录')}
             </button>
             </form>
 
             {/* Toggle */}
             <div className="mt-6 text-center">
                 <p className="text-sm text-gray-500">
-                    {isRegistering ? "Already have an account?" : "New to USTC Assistant?"}
+                    {isRegistering ? "已注册?" : "尚未注册?"}
                     <button 
                         onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
                         className="ml-2 text-blue-600 font-bold hover:underline focus:outline-none"
                     >
-                        {isRegistering ? 'Sign In' : 'Register Now'}
+                        {isRegistering ? '登录' : '立即注册'}
                     </button>
                 </p>
             </div>
