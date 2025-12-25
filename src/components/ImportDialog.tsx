@@ -70,7 +70,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-2xl w-[450px] overflow-hidden animate-in zoom-in-95">
         <div className="bg-gray-800 p-4 text-white flex justify-between items-center">
-          <h2 className="font-bold flex items-center gap-2"><RefreshCw size={18}/> Sync Schedule</h2>
+          <h2 className="font-bold flex items-center gap-2"><RefreshCw size={18}/> 导入日程表</h2>
           <button onClick={onClose}><X size={18}/></button>
         </div>
         
@@ -79,19 +79,19 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
             onClick={() => { setSource('教务系统'); setError(''); }}
             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '教务系统' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
-            <BookOpen size={16}/> Undergrad (JW)
+            <BookOpen size={16}/> 教务系统
           </button>
           <button 
             onClick={() => { setSource('研究生教务系统'); setError(''); }}
             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '研究生教务系统' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
-            <GraduationCap size={16}/> Graduate (YJS)
+            <GraduationCap size={16}/> 研究生教务系统
           </button>
           <button 
              onClick={() => { setSource('二课平台'); setError(''); }}
              className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '二课平台' ? 'text-pink-600 border-b-2 border-pink-600 bg-pink-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
-            <Coffee size={16}/> Second (Young)
+            <Coffee size={16}/> 第二课堂
           </button>
         </div>
 
