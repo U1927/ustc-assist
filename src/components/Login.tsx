@@ -175,7 +175,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {/* Confirm Password (Register Only) */}
             {isRegistering && (
                 <div className="space-y-1.5 animate-in slide-in-from-top-2 fade-in">
-                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">Confirm Password</label>
+                    <label className="text-xs font-bold text-gray-500 uppercase ml-1">确认密码</label>
                     <div className="relative">
                         <ShieldCheck className="absolute left-3 top-2.5 text-gray-400" size={18} />
                         <input
