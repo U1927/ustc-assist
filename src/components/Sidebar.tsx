@@ -159,7 +159,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             {conflicts.length > 0 ? (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3">
                  <div className="flex items-center gap-2 text-red-700 font-semibold mb-2">
-                   <AlertTriangle size={16} /> Conflicts Detected
+                   <AlertTriangle size={16} /> 检测到冲突
                  </div>
                  <ul className="list-disc list-inside text-xs text-red-600 space-y-1">
                    {conflicts.map((c, i) => <li key={i}>{c}</li>)}
@@ -167,46 +167,46 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
             ) : (
               <div className="text-sm text-green-600 flex items-center gap-2 bg-green-50 p-2 rounded border border-green-100">
-                <Check size={16} /> No schedule conflicts
+                <Check size={16} /> 没有日程冲突
               </div>
             )}
             
             {/* Import Section */}
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Sync Data</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">同步数据</h3>
               <button 
                 onClick={onOpenImport}
                 className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 py-2 px-3 rounded text-sm transition"
               >
-                <FileJson size={16} /> Import JW Schedule
+                <FileJson size={16} /> 从教务系统/研究生教务系统/第二课堂导入课程
               </button>
               <p className="text-[10px] text-gray-400 mt-1">
-                 Parse real data from JW system (Copy & Paste required).
+                 从教务系统/研究生教务系统/第二课堂解析数据
               </p>
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Smart Assistant</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">智慧助手</h3>
               <button 
                 onClick={onGeneratePlan}
                 disabled={isLoadingAI}
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:opacity-90 py-2 px-3 rounded text-sm transition shadow-sm"
               >
-                {isLoadingAI ? <span className="animate-pulse">Thinking...</span> : (
+                {isLoadingAI ? <span className="animate-pulse">思考中</span> : (
                   <>
-                   <Sparkles size={16} /> Generate Study Plan
+                   <Sparkles size={16} /> 
                   </>
                 )}
               </button>
             </div>
 
              <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">System</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">系统设置</h3>
               <button 
                 onClick={onOpenSettings}
                 className="w-full flex items-center justify-center gap-2 bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100 py-2 px-3 rounded text-sm transition"
               >
-                <Settings size={16} /> Preferences
+                <Settings size={16} /> 偏好设置
               </button>
             </div>
           </div>
