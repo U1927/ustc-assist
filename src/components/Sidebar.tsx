@@ -150,7 +150,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 );
               })}
               {todos.length === 0 && (
-                <div className="text-center text-gray-400 text-sm mt-10">No tasks yet.</div>
+                <div className="text-center text-gray-400 text-sm mt-10">还没有任务</div>
               )}
             </div>
           </>
