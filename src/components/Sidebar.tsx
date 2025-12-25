@@ -194,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               >
                 {isLoadingAI ? <span className="animate-pulse">思考中</span> : (
                   <>
-                   <Sparkles size={16} /> 
+                   <Sparkles size={16} /> 生成学习计划
                   </>
                 )}
               </button>
