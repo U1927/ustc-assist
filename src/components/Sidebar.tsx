@@ -94,7 +94,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 type="text"
                 value={newTodo}
                 onChange={(e) => setNewTodo(e.target.value)}
-                placeholder="Add a task..."
+                placeholder="添加待办"
                 className="w-full text-sm p-2 border border-gray-300 rounded focus:border-blue-500 outline-none"
               />
               <div className="flex gap-2">
@@ -109,9 +109,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onChange={(e) => setPriority(e.target.value as Priority)}
                   className="text-xs border border-gray-300 rounded px-1 outline-none"
                 >
-                  <option value="high">High</option>
-                  <option value="medium">Med</option>
-                  <option value="low">Low</option>
+                  <option value="high">紧急</option>
+                  <option value="medium">中等</option>
+                  <option value="low">不紧急</option>
                 </select>
                 <button type="submit" className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
                   <Plus size={16} />
@@ -139,7 +139,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                       {todo.deadline && (
                         <p className={`text-xs mt-1 pl-4 ${expired ? 'text-red-500 font-bold' : 'text-gray-400'}`}>
-                           {expired ? 'Expired' : 'Due'}: {format(new Date(todo.deadline), 'MM/dd HH:mm')}
+                           {expired ? '已截止' : '截止日期'}: {format(new Date(todo.deadline), 'MM/dd HH:mm')}
                         </p>
                       )}
                     </div>
