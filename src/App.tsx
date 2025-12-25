@@ -394,7 +394,7 @@ const App: React.FC = () => {
               {addMode === 'single' ? (
                 <form onSubmit={handleAddSingleEvent} className="space-y-3">
                   <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="标题 (e.g. 社团周常)" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
-                  <select className="w-full border p-2 rounded text-sm outline-none" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}><option value="activity">Activity</option><option value="exam">考试</option><option value="study">自习</option><option value="course">新增课程</option></select>
+                  <select className="w-full border p-2 rounded text-sm outline-none" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}><option value="activity">活动 </option><option value="exam">考试</option><option value="study">自习</option><option value="course">新增课程</option></select>
                   <input className="w-full border p-2 rounded text-sm outline-none" placeholder="地点" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
                   <textarea className="w-full border p-2 rounded text-sm outline-none resize-none h-20" placeholder="描述/注意事项" value={newEvent.description || ''} onChange={e => setNewEvent({...newEvent, description: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
