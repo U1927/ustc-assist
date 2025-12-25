@@ -20,14 +20,14 @@ export const USTC_TIME_SLOTS: Record<number, { start: string; end: string }> = {
 };
 
 export const COMMON_PERIODS = [
-  { label: '1-2 (Early Morning)', start: 1, end: 2 },
-  { label: '3-4 (Morning 1)', start: 3, end: 4 },
-  { label: '3-5 (Morning Long)', start: 3, end: 5 },
-  { label: '6-7 (Afternoon 1)', start: 6, end: 7 },
-  { label: '8-9 (Afternoon 2)', start: 8, end: 9 },
-  { label: '8-10 (Afternoon Long)', start: 8, end: 10 },
-  { label: '11-12 (Evening)', start: 11, end: 12 },
-  { label: '11-13 (Evening Long)', start: 11, end: 13 },
+  { label: '1-2', start: 1, end: 2 },
+  { label: '3-4', start: 3, end: 4 },
+  { label: '3-5', start: 3, end: 5 },
+  { label: '6-7', start: 6, end: 7 },
+  { label: '8-9', start: 8, end: 9 },
+  { label: '8-10', start: 8, end: 10 },
+  { label: '11-12', start: 11, end: 12 },
+  { label: '11-13', start: 11, end: 13 },
 ];
 
 export const checkForConflicts = (newItem: ScheduleItem, existingItems: ScheduleItem[]): boolean => {
