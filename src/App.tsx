@@ -385,7 +385,7 @@ const App: React.FC = () => {
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-4 border-b flex justify-between items-center"><h2 className="text-lg font-bold text-gray-800">Add to Schedule</h2><button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button></div>
+            <div className="p-4 border-b flex justify-between items-center"><h2 className="text-lg font-bold text-gray-800">添加到日程</h2><button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button></div>
             <div className="flex border-b">
                <button onClick={() => setAddMode('single')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'single' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>单个事件</button>
                <button onClick={() => setAddMode('course')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'course' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>课程系列</button>
