@@ -66,7 +66,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
       <div className="flex flex-col h-full overflow-hidden">
         {/* Header Days */}
         <div className="grid grid-cols-8 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-          <div className="p-2 text-center text-xs font-semibold text-gray-500 border-r">Time</div>
+          <div className="p-2 text-center text-xs font-semibold text-gray-500 border-r">时间</div>
           {days.map(day => (
             <div key={day.toISOString()} className={`p-2 text-center border-r ${isSameDay(day, new Date()) ? 'bg-blue-50' : ''}`}>
               <div className="text-xs font-bold text-slate-700">{format(day, 'EEE')}</div>
