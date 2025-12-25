@@ -283,21 +283,21 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-bold text-blue-900 tracking-tight flex items-center gap-2">
               <span className="bg-blue-900 text-white p-1 rounded text-xs">USTC</span>
-              Assistant
+              日程助手
             </h1>
             <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <button onClick={() => setViewMode(ViewMode.WEEK)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Week</button>
-              <button onClick={() => setViewMode(ViewMode.MONTH)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>Month</button>
+              <button onClick={() => setViewMode(ViewMode.WEEK)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.WEEK ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>周视图</button>
+              <button onClick={() => setViewMode(ViewMode.MONTH)} className={`px-3 py-1 text-xs font-medium rounded-md transition ${viewMode === ViewMode.MONTH ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}>月视图</button>
             </div>
             
             <div className="flex items-center gap-2">
               <button onClick={() => navigateDate('prev')} className="p-1 hover:bg-gray-100 rounded"><ChevronLeft size={20} /></button>
               <span className="text-sm font-semibold w-32 text-center">
-                {viewMode === ViewMode.WEEK ? `Week of ${format(currentDate, 'MMM d')}` : format(currentDate, 'MMMM yyyy')}
+                {viewMode === ViewMode.WEEK ? `${format(currentDate, 'MMM d')}所在周` : format(currentDate, 'MMMM yyyy')}
               </span>
               <button onClick={() => navigateDate('next')} className="p-1 hover:bg-gray-100 rounded"><ChevronRight size={20} /></button>
             </div>
-            <button onClick={() => setCurrentDate(new Date())} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 hover:bg-blue-100">Today</button>
+            <button onClick={() => setCurrentDate(new Date())} className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100 hover:bg-blue-100">今天</button>
           </div>
 
           <div className="flex items-center gap-4">
@@ -307,7 +307,7 @@ const App: React.FC = () => {
                 {syncStatus === 'saved' && <CheckCircle size={14} className="text-green-500" />}
                 {syncStatus === 'error' && <WifiOff size={14} className="text-red-500" />}
                 <span className={`${syncStatus === 'error' ? 'text-red-500' : 'text-gray-500'}`}>
-                   {syncStatus === 'idle' ? 'Synced' : syncStatus === 'syncing' ? 'Saving...' : syncStatus === 'saved' ? 'Saved' : 'Offline'}
+                   {syncStatus === 'idle' ? '已同步' : syncStatus === 'syncing' ? '保存中...' : syncStatus === 'saved' ? '已保存' : '离线'}
                 </span>
              </div>
 
@@ -316,7 +316,7 @@ const App: React.FC = () => {
              </div>
              
              <button onClick={() => setShowAddModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 shadow-sm transition active:scale-95">
-               <Plus size={16} /> Add
+               <Plus size={16} /> 添加课程/活动
              </button>
              <button onClick={handleLogout} className="text-gray-400 hover:text-red-500 transition p-1 hover:bg-gray-100 rounded"><LogOut size={20} /></button>
           </div>
@@ -375,8 +375,8 @@ const App: React.FC = () => {
                   {selectedEvent.description && <div className="flex items-start gap-2 bg-gray-50 p-2 rounded"><AlignLeft size={16} className="text-gray-400 mt-0.5"/><p className="text-xs leading-relaxed">{selectedEvent.description}</p></div>}
                </div>
                <div className="mt-6 pt-4 border-t flex justify-end gap-2">
-                  <button onClick={() => handleDeleteEvent(selectedEvent.id)} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition"><Trash2 size={14}/> Delete</button>
-                  <button onClick={() => setSelectedEvent(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-xs font-bold transition">Close</button>
+                  <button onClick={() => handleDeleteEvent(selectedEvent.id)} className="text-red-600 hover:bg-red-50 px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition"><Trash2 size={14}/>删除 </button>
+                  <button onClick={() => setSelectedEvent(null)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-1.5 rounded text-xs font-bold transition">关闭</button>
                </div>
             </div>
          </div>
@@ -387,31 +387,31 @@ const App: React.FC = () => {
           <div className="bg-white rounded-xl shadow-2xl w-[450px] max-w-full animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
             <div className="p-4 border-b flex justify-between items-center"><h2 className="text-lg font-bold text-gray-800">Add to Schedule</h2><button onClick={() => setShowAddModal(false)}><X size={20} className="text-gray-400 hover:text-gray-600"/></button></div>
             <div className="flex border-b">
-               <button onClick={() => setAddMode('single')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'single' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>Single Event</button>
-               <button onClick={() => setAddMode('course')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'course' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>Course Series</button>
+               <button onClick={() => setAddMode('single')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'single' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>单个事件</button>
+               <button onClick={() => setAddMode('course')} className={`flex-1 py-2 text-sm font-medium ${addMode === 'course' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}>课程系列</button>
             </div>
             <div className="p-6 overflow-y-auto">
               {addMode === 'single' ? (
                 <form onSubmit={handleAddSingleEvent} className="space-y-3">
-                  <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Title (e.g. Club Meeting)" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
-                  <select className="w-full border p-2 rounded text-sm outline-none" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}><option value="activity">Activity</option><option value="exam">Exam</option><option value="study">Self Study</option><option value="course">Makeup Class</option></select>
-                  <input className="w-full border p-2 rounded text-sm outline-none" placeholder="Location" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
-                  <textarea className="w-full border p-2 rounded text-sm outline-none resize-none h-20" placeholder="Description / Notes" value={newEvent.description || ''} onChange={e => setNewEvent({...newEvent, description: e.target.value})} />
+                  <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="标题 (e.g. 社团周常)" required value={newEvent.title || ''} onChange={e => setNewEvent({...newEvent, title: e.target.value})} />
+                  <select className="w-full border p-2 rounded text-sm outline-none" value={newEvent.type} onChange={e => setNewEvent({...newEvent, type: e.target.value as any})}><option value="activity">Activity</option><option value="exam">考试</option><option value="study">自习</option><option value="course">新增课程</option></select>
+                  <input className="w-full border p-2 rounded text-sm outline-none" placeholder="地点" value={newEvent.location || ''} onChange={e => setNewEvent({...newEvent, location: e.target.value})} />
+                  <textarea className="w-full border p-2 rounded text-sm outline-none resize-none h-20" placeholder="描述/注意事项" value={newEvent.description || ''} onChange={e => setNewEvent({...newEvent, description: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
-                    <div><label className="text-xs text-gray-500 block mb-1">Start</label><input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} /></div>
-                    <div><label className="text-xs text-gray-500 block mb-1">End</label><input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} /></div>
+                    <div><label className="text-xs text-gray-500 block mb-1">开始时间 </label><input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.startTime} onChange={e => setNewEvent({...newEvent, startTime: e.target.value})} /></div>
+                    <div><label className="text-xs text-gray-500 block mb-1">结束时间 </label><input type="datetime-local" required className="w-full border p-2 rounded text-xs" value={newEvent.endTime} onChange={e => setNewEvent({...newEvent, endTime: e.target.value})} /></div>
                   </div>
-                  <button type="submit" className="w-full py-2.5 mt-2 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700">Add Event</button>
+                  <button type="submit" className="w-full py-2.5 mt-2 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700">添加事件</button>
                 </form>
               ) : (
                 <form onSubmit={handleAddCourseSeries} className="space-y-4">
                    <div className="space-y-2">
-                      <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="Course Name (e.g. Linear Algebra)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
-                      <div className="grid grid-cols-2 gap-2"><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Location" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} /><input className="w-full border p-2 rounded text-sm outline-none" placeholder="Textbook" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} /></div>
+                      <input className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500" placeholder="课程名称 (e.g. 线性代数)" required value={courseForm.title} onChange={e => setCourseForm({...courseForm, title: e.target.value})} />
+                      <div className="grid grid-cols-2 gap-2"><input className="w-full border p-2 rounded text-sm outline-none" placeholder="地点" value={courseForm.location} onChange={e => setCourseForm({...courseForm, location: e.target.value})} /><input className="w-full border p-2 rounded text-sm outline-none" placeholder="课本" value={courseForm.textbook} onChange={e => setCourseForm({...courseForm, textbook: e.target.value})} /></div>
                    </div>
                    <div className="bg-gray-50 p-3 rounded-lg space-y-3">
-                      <h3 className="text-xs font-bold text-gray-500 uppercase">Schedule Logic</h3>
-                      <div className="flex items-center gap-2 text-sm"><span className="text-gray-600">Weeks:</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} /><span className="text-gray-400">-</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} /></div>
+                      <h3 className="text-xs font-bold text-gray-500 uppercase">课程时间 </h3>
+                      <div className="flex items-center gap-2 text-sm"><span className="text-gray-600">周数 </span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekStart} onChange={e => setCourseForm({...courseForm, weekStart: Number(e.target.value)})} /><span className="text-gray-400">-</span><input type="number" min="1" max="30" className="w-16 border p-1 rounded text-center outline-none" value={courseForm.weekEnd} onChange={e => setCourseForm({...courseForm, weekEnd: Number(e.target.value)})} /></div>
                       <div className="space-y-2">
                          {courseForm.schedule.map((slot, idx) => (
                              <div key={idx} className="flex gap-2">
@@ -420,10 +420,10 @@ const App: React.FC = () => {
                                 <button type="button" onClick={() => { const newSched = courseForm.schedule.filter((_, i) => i !== idx); setCourseForm({...courseForm, schedule: newSched}); }} className="text-red-400 hover:text-red-600 px-1"><Trash2 size={16}/></button>
                              </div>
                          ))}
-                         <button type="button" onClick={() => setCourseForm({...courseForm, schedule: [...courseForm.schedule, { day: 1, periods: '3-4' }]})} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus size={12}/> Add Another Time Slot</button>
+                         <button type="button" onClick={() => setCourseForm({...courseForm, schedule: [...courseForm.schedule, { day: 1, periods: '3-4' }]})} className="text-xs text-blue-600 hover:underline flex items-center gap-1"><Plus size={12}/> 添加另一个时间</button>
                       </div>
                    </div>
-                   <button type="submit" className="w-full py-2.5 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700 shadow-md">Generate & Add Course</button>
+                   <button type="submit" className="w-full py-2.5 text-sm bg-blue-600 text-white font-bold rounded hover:bg-blue-700 shadow-md">生成并添加课程</button>
                 </form>
               )}
             </div>
