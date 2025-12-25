@@ -46,7 +46,7 @@ export const getTodos = (): TodoItem[] => {
  * Register a new user with ID and Password
  */
 export const registerUser = async (studentId: string, password: string): Promise<{ success: boolean; error?: string }> => {
-  if (!supabase) return { success: false, error: "System Error: Database not connected." };
+  if (!supabase) return { success: false, error: "系统错误：数据库未连接" };
 
   try {
     // 1. Check if user already exists
@@ -58,7 +58,7 @@ export const registerUser = async (studentId: string, password: string): Promise
 
     if (checkError) throw checkError;
     if (existingUser) {
-      return { success: false, error: "User already exists. Please login." };
+      return { success: false, error: "用户已存在,请登录" };
     }
 
     // 2. Insert new user
@@ -75,7 +75,7 @@ export const registerUser = async (studentId: string, password: string): Promise
 
     return { success: true };
   } catch (err: any) {
-    console.error("Registration Error:", err);
+    console.error("注册错误:", err);
     return { success: false, error: err.message };
   }
 };
@@ -84,7 +84,7 @@ export const registerUser = async (studentId: string, password: string): Promise
  * Login existing user with ID and Password
  */
 export const loginUser = async (studentId: string, password: string): Promise<{ success: boolean; error?: string; user?: any }> => {
-  if (!supabase) return { success: false, error: "System Error: Database not connected." };
+  if (!supabase) return { success: false, error: "系统错误：数据库未连接" };
 
   try {
     const { data, error } = await supabase
@@ -95,17 +95,17 @@ export const loginUser = async (studentId: string, password: string): Promise<{ 
 
     if (error) throw error;
     if (!data) {
-      return { success: false, error: "User not found. Please register." };
+      return { success: false, error: "找不到用户,请注册" };
     }
 
     // Verify Password (Simple comparison for this architecture)
     if (data.password !== password) {
-      return { success: false, error: "Incorrect password." };
+      return { success: false, error: "密码不正确" };
     }
 
     return { success: true, user: data };
   } catch (err: any) {
-    console.error("Login Error:", err);
+    console.error("登录错误:", err);
     return { success: false, error: err.message };
   }
 };
@@ -114,7 +114,7 @@ export const loginUser = async (studentId: string, password: string): Promise<{ 
  * Change Password
  */
 export const changePassword = async (studentId: string, oldPass: string, newPass: string): Promise<{ success: boolean; error?: string }> => {
-  if (!supabase) return { success: false, error: "Database disconnected" };
+  if (!supabase) return { success: false, error: "数据库已断开连接" };
 
   try {
     // 1. Verify old password
@@ -125,8 +125,8 @@ export const changePassword = async (studentId: string, oldPass: string, newPass
       .maybeSingle();
 
     if (fetchError) throw fetchError;
-    if (!data) return { success: false, error: "User not found" };
-    if (data.password !== oldPass) return { success: false, error: "Incorrect current password" };
+    if (!data) return { success: false, error: "用户未找到" };
+    if (data.password !== oldPass) return { success: false, error: "当前密码不正确" };
 
     // 2. Update password
     const { error: updateError } = await supabase
@@ -138,14 +138,14 @@ export const changePassword = async (studentId: string, oldPass: string, newPass
 
     return { success: true };
   } catch (err: any) {
-    console.error("Change Password Error:", err);
+    console.error("更改密码错误:", err);
     return { success: false, error: err.message };
   }
 };
 
 export const fetchUserData = async (studentId: string): Promise<{ schedule: ScheduleItem[], todos: TodoItem[] } | null> => {
   if (!supabase) {
-    console.error("Supabase client not initialized! Check .env");
+    console.error("Supabase客户端未初始化!检查.env");
     return null;
   }
 
@@ -157,7 +157,7 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
       .maybeSingle();
 
     if (error) {
-      console.error(`[Storage] Fetch Error:`, error);
+      console.error(`[Storage]提取错误:`, error);
       return null;
     }
 
@@ -170,13 +170,13 @@ export const fetchUserData = async (studentId: string): Promise<{ schedule: Sche
       todos: data.todos || []
     };
   } catch (err: any) {
-    console.error(`[Storage] Network Error during Fetch:`, err);
+    console.error(`[Storage]提取过程中发生网络错误:`, err);
     return null;
   }
 };
 
 export const saveUserData = async (studentId: string, schedule: ScheduleItem[], todos: TodoItem[]): Promise<{ success: boolean; error?: string }> => {
-  if (!supabase) return { success: false, error: "Supabase client missing" };
+  if (!supabase) return { success: false, error: "Supabase客户端丢失" };
 
   const cleanSchedule = JSON.parse(JSON.stringify(schedule));
   const cleanTodos = JSON.parse(JSON.stringify(todos));
@@ -192,7 +192,7 @@ export const saveUserData = async (studentId: string, schedule: ScheduleItem[], 
       .eq('student_id', studentId);
 
     if (error) {
-       console.error("[Storage] Update Error:", error);
+       console.error("[Storage]更新错误:", error);
        return { success: false, error: `${error.code}: ${error.message}` };
     }
 
