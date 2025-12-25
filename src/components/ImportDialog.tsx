@@ -10,7 +10,7 @@ interface ImportDialogProps {
 }
 
 const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }) => {
-  const [source, setSource] = useState<'jw' | 'yjs' | 'young'>('jw');
+  const [source, setSource] = useState<'教务系统' | '研究生教务系统' | '二课平台'>('教务系统');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -29,9 +29,9 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
     try {
       let result;
-      if (source === 'jw') {
+      if (source === '教务系统') {
         result = await Crawler.syncFromJW(username, password, captchaCode, loginContext);
-      } else if (source === 'yjs') {
+      } else if (source === '研究生教务系统') {
         result = await Crawler.syncFromYJS(username, password, captchaCode, loginContext);
       } else {
         result = await Crawler.syncFromYoung(username, password, captchaCode, loginContext);
@@ -46,7 +46,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
       onImport(result);
       onClose();
-      alert(`Successfully synced data from ${source.toUpperCase()}!`);
+      alert(`成功从 ${source.toUpperCase()} 导入课程!`);
     } catch (err: any) {
       setError(err.message);
       if (!err.message.includes('code')) {
@@ -60,9 +60,9 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
   const getSourceConfig = () => {
       switch(source) {
-          case 'jw': return { url: 'jw.ustc.edu.cn', label: 'First Classroom' };
-          case 'yjs': return { url: 'yjs1.ustc.edu.cn', label: 'Graduate System' };
-          case 'young': return { url: 'young.ustc.edu.cn', label: 'Second Classroom' };
+          case '教务系统': return { url: 'jw.ustc.edu.cn', label: '第一课堂' };
+          case '研究生教务系统': return { url: 'yjs1.ustc.edu.cn', label: '研究生系统' };
+          case '二课平台': return { url: 'young.ustc.edu.cn', label: '第二课堂' };
       }
   }
 
@@ -76,19 +76,19 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         
         <div className="flex border-b">
           <button 
-            onClick={() => { setSource('jw'); setError(''); }}
+            onClick={() => { setSource('教务系统'); setError(''); }}
             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'jw' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <BookOpen size={16}/> Undergrad (JW)
           </button>
           <button 
-            onClick={() => { setSource('yjs'); setError(''); }}
+            onClick={() => { setSource('研究生教务系统'); setError(''); }}
             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'yjs' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <GraduationCap size={16}/> Graduate (YJS)
           </button>
           <button 
-             onClick={() => { setSource('young'); setError(''); }}
+             onClick={() => { setSource('二课平台'); setError(''); }}
              className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'young' ? 'text-pink-600 border-b-2 border-pink-600 bg-pink-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <Coffee size={16}/> Second (Young)
@@ -110,7 +110,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
                   value={password} 
                   onChange={e => setPassword(e.target.value)} 
                   className="w-full border p-2.5 rounded text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 pr-10 transition" 
-                  placeholder="CAS Password" 
+                  placeholder="统一身份认证密码" 
                 />
                 <button
                     type="button"
@@ -134,7 +134,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
           <button type="submit" disabled={isLoading} className="w-full bg-slate-800 text-white font-bold py-2.5 rounded hover:bg-slate-900 disabled:opacity-50 flex justify-center gap-2 transition shadow-lg mt-2">
             {isLoading && <Loader2 size={16} className="animate-spin"/>} 
-            {isLoading ? 'Syncing...' : `Sync ${getSourceConfig().label}`}
+            {isLoading ? '同步中' : `Sync ${getSourceConfig().label}`}
           </button>
         </form>
       </div>
