@@ -125,20 +125,20 @@ const App: React.FC = () => {
   // Import Data from Dialog (JW/Young)
   const handleImportJson = (jsonStr: any) => {
     if (!user?.settings.semester?.startDate) {
-        alert("Please set the Semester Start Date in settings first!");
+        alert("请先在设置中设定学期开始日期");
         setShowSettingsModal(true);
         return;
     }
     try {
       const newItems = UstcParser.parseJwJson(jsonStr, user.settings.semester.startDate);
-      if (newItems.length === 0) { alert("No valid courses found in data."); return; }
+      if (newItems.length === 0) { alert("未发现课程"); return; }
       
       // Deduplicate based on title+startTime
       const existingSignatures = new Set(events.map(e => `${e.title}-${e.startTime}`));
       const uniqueItems = newItems.filter(item => !existingSignatures.has(`${item.title}-${item.startTime}`));
       
       if (uniqueItems.length === 0) { 
-          alert("All courses/activities already exist in your schedule."); 
+          alert("您已安排的所有课程/活动均已在日程中存在"); 
           setShowImportModal(false); 
           return; 
       }
@@ -166,7 +166,7 @@ const App: React.FC = () => {
     };
 
     if (Utils.checkForConflicts(item, events)) {
-       if (!confirm("⚠️ Conflict detected! Add anyway?")) return;
+       if (!confirm("⚠️检测到冲突，仍要添加?")) return;
     }
 
     setEvents([...events, item]);
@@ -205,18 +205,18 @@ const App: React.FC = () => {
     }
     setEvents([...events, ...newItems]);
     setShowAddModal(false);
-    alert(`Added ${newItems.length} course sessions.`);
+    alert(`添加 ${newItems.length} 个课程安排.`);
   };
 
   const handleDeleteEvent = (id: string) => {
-    if (confirm('Delete this event?')) {
+    if (confirm('删除这个事件?')) {
       setEvents(events.filter(e => e.id !== id));
       if (selectedEvent?.id === id) setSelectedEvent(null);
     }
   };
 
   // Todo Handlers
-  const handleAddTodo = (content: string, deadline?: string, priority: Priority = 'medium') => {
+  const handleAddTodo = (content: string, deadline?: string, priority: Priority = '中等') => {
     setTodos([...todos, {
       id: crypto.randomUUID(),
       content,
