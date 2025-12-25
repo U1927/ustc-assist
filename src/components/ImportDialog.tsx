@@ -77,19 +77,19 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         <div className="flex border-b">
           <button 
             onClick={() => { setSource('教务系统'); setError(''); }}
-            className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'jw' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
+            className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '教务系统' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <BookOpen size={16}/> Undergrad (JW)
           </button>
           <button 
             onClick={() => { setSource('研究生教务系统'); setError(''); }}
-            className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'yjs' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-gray-500 hover:bg-gray-50'}`}
+            className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '研究生教务系统' ? 'text-purple-600 border-b-2 border-purple-600 bg-purple-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <GraduationCap size={16}/> Graduate (YJS)
           </button>
           <button 
              onClick={() => { setSource('二课平台'); setError(''); }}
-             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === 'young' ? 'text-pink-600 border-b-2 border-pink-600 bg-pink-50' : 'text-gray-500 hover:bg-gray-50'}`}
+             className={`flex-1 py-3 text-xs font-bold flex flex-col items-center justify-center gap-1 transition ${source === '二课平台' ? 'text-pink-600 border-b-2 border-pink-600 bg-pink-50' : 'text-gray-500 hover:bg-gray-50'}`}
           >
             <Coffee size={16}/> Second (Young)
           </button>
@@ -98,11 +98,11 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
         <form onSubmit={handleSync} className="p-6 space-y-4">
           <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded border flex items-center gap-2">
             <AlertCircle size={14} />
-            <span>Connects to <strong>{getSourceConfig().url}</strong> via CAS.</span>
+            <span>通过统一身份认证连接到 <strong>{getSourceConfig().url}</strong></span>
           </div>
 
           <div className="space-y-3">
-              <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border p-2.5 rounded text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition" placeholder="Student ID (e.g. SA23...)" />
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border p-2.5 rounded text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition" placeholder="学号 (e.g. PB25...)" />
               
               <div className="relative">
                 <input 
@@ -134,7 +134,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ isOpen, onClose, onImport }
 
           <button type="submit" disabled={isLoading} className="w-full bg-slate-800 text-white font-bold py-2.5 rounded hover:bg-slate-900 disabled:opacity-50 flex justify-center gap-2 transition shadow-lg mt-2">
             {isLoading && <Loader2 size={16} className="animate-spin"/>} 
-            {isLoading ? '同步中' : `Sync ${getSourceConfig().label}`}
+            {isLoading ? '同步中' : `同步 ${getSourceConfig().label}`}
           </button>
         </form>
       </div>
