@@ -51,15 +51,15 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const handleChangePassSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldPass || !newPass) {
-      setPassMessage({ text: 'Please fill all fields', type: 'error' });
+      setPassMessage({ text: '请填写所有字段', type: 'error' });
       return;
     }
     if (newPass !== confirmPass) {
-      setPassMessage({ text: 'New passwords do not match', type: 'error' });
+      setPassMessage({ text: '新密码不匹配', type: 'error' });
       return;
     }
     if (newPass.length < 6) {
-      setPassMessage({ text: 'Password must be at least 6 chars', type: 'error' });
+      setPassMessage({ text: '密码必须至少包含6个字符', type: 'error' });
       return;
     }
 
@@ -70,12 +70,12 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
     
     setIsChangingPass(false);
     if (res.success) {
-      setPassMessage({ text: 'Password updated successfully', type: 'success' });
+      setPassMessage({ text: '密码更新成功', type: 'success' });
       setOldPass('');
       setNewPass('');
       setConfirmPass('');
     } else {
-      setPassMessage({ text: res.error || 'Failed to update', type: 'error' });
+      setPassMessage({ text: res.error || '更新失败', type: 'error' });
     }
   };
 
@@ -111,7 +111,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    />
                  </div>
                  <div>
-                   <label className="block text-xs font-semibold text-gray-600 mb-1">Total Weeks</label>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">总周数</label>
                    <input 
                      type="number" 
                      value={formData.semester?.totalWeeks || 18}
@@ -123,7 +123,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    />
                  </div>
                  <div className="col-span-2">
-                   <label className="block text-xs font-semibold text-gray-600 mb-1">Start Date (Monday of Week 1)</label>
+                   <label className="block text-xs font-semibold text-gray-600 mb-1">开始日期 (Monday of Week 1)</label>
                    <input 
                      type="date" 
                      value={formData.semester?.startDate || ''}
@@ -134,7 +134,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                      className="w-full border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500"
                    />
                    <p className="text-[10px] text-gray-400 mt-1">
-                     Determines the dates for "Week 1", "Week 2", etc.
+                     确定“第1周”、“第2周”等的日期。
                    </p>
                  </div>
               </div>
@@ -152,14 +152,15 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                     className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
                   />
                   <div className="flex-1">
-                    <div className="text-sm font-bold text-gray-900">早八提醒 (Early 8 Alert)</div>
-                    <div className="text-xs text-gray-500">Get notified the night before 8:00 AM classes.</div>
+                    <div className="text-sm font-bold text-gray-900">早八提醒</div>
+                    <div className="text-xs text-gray-500">上午8:00上课前一晚收到通知。</div>
                   </div>
                 </label>
 
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Class Reminder</label>
+                  <label className="block text-sm font-bold text-gray-700 mb-1">课堂提醒</label>
                   <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">开始前</span>
                     <input 
                       type="number" 
                       min="0"
@@ -168,7 +169,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                       onChange={e => setFormData({...formData, reminderMinutesBefore: Number(e.target.value)})}
                       className="w-20 border p-2 rounded text-sm outline-none focus:ring-2 focus:ring-blue-500 text-center"
                     />
-                    <span className="text-sm text-gray-500">minutes before start</span>
+                    <span className="text-sm text-gray-500">分钟</span>
                   </div>
                 </div>
               </div>
@@ -178,14 +179,14 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
           {/* Security Section */}
           <div className="space-y-3 pt-2">
             <h3 className="text-xs font-bold text-gray-500 uppercase border-b pb-1 flex items-center gap-1">
-              <Lock size={12}/> Account Security
+              <Lock size={12}/> 账户安全
             </h3>
             <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
                <div className="space-y-2">
                  <div className="relative">
                    <input 
                      type={showOldPass ? "text" : "password"} 
-                     placeholder="Current Password"
+                     placeholder="当前密码"
                      className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
                      value={oldPass}
                      onChange={e => setOldPass(e.target.value)}
@@ -199,7 +200,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    <div className="relative">
                      <input 
                       type={showNewPass ? "text" : "password"} 
-                      placeholder="New Password"
+                      placeholder="新密码"
                       className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
                       value={newPass}
                       onChange={e => setNewPass(e.target.value)}
@@ -211,7 +212,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    <div className="relative">
                      <input 
                       type={showConfirmPass ? "text" : "password"} 
-                      placeholder="Confirm New"
+                      placeholder="确认新密码"
                       className="w-full text-sm pl-2 pr-8 py-2 border rounded focus:border-blue-500 outline-none"
                       value={confirmPass}
                       onChange={e => setConfirmPass(e.target.value)}
@@ -233,7 +234,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
                    disabled={isChangingPass}
                    className="w-full bg-slate-800 text-white text-xs font-bold py-2 rounded hover:bg-slate-900 transition flex justify-center"
                  >
-                   {isChangingPass ? "Updating..." : "Update Password"}
+                   {isChangingPass ? "正在更新..." : "更新密码"}
                  </button>
                </div>
             </div>
@@ -249,7 +250,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
               className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 py-2 px-3 rounded text-sm transition"
             >
               <CloudLightning size={16} /> 
-              {isSyncing ? "Testing Connection..." : "Test Cloud Connection (Force Save)"}
+              {isSyncing ? "测试连接..." : "测试云连接（强制保存）"}
             </button>
           </div>
         </div>
@@ -257,7 +258,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
         <div className="p-4 border-t bg-gray-50 flex justify-end gap-2 rounded-b-xl">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded">Close</button>
           <button form="settings-form" type="submit" className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-2">
-            <Save size={16}/> Save Preferences
+            <Save size={16}/>保存偏好设置
           </button>
         </div>
       </div>
